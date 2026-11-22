@@ -28,7 +28,7 @@ export type Look = {
   night: number; // 0 gündüz … 1 gece
 };
 
-function makeSky() {
+export function makeSky() {
   const sky = new Sky();
   const m = sky.material as THREE.ShaderMaterial;
   m.uniforms.skyGain = { value: 1 };

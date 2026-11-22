@@ -4,7 +4,11 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { FullData } from "@/lib/types";
 import { buildHouse, disposeTree, floorBases, roomAtPoint, setNight, type V3 } from "@/lib/scene3d";
+import dynamic from "next/dynamic";
+import type { PhotoCam } from "@/lib/photo";
 import { applyLookSun, disposeLook, renderLook, resizeLook, setLookClip, setupLook, type Look } from "@/lib/look";
+
+const Photo = dynamic(() => import("./Photo"), { ssr: false });
 
 type Preset = "corner" | "front" | "side" | "top" | "keep";
 
@@ -56,6 +60,7 @@ export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onE
       return true;
     }
   });
+  const [photo, setPhoto] = useState<{ cam: PhotoCam; inside: { floor: number } | null; aspect: number } | null>(null);
   const hqRef = useRef(hq);
   hqRef.current = hq;
 
@@ -484,6 +489,14 @@ export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onE
     a.render();
   }
 
+  function openPhoto() {
+    const a = api.current;
+    if (!a) return;
+    const c = a.camera;
+    const el = host.current;
+    setPhoto({ cam: { pos: c.position.clone(), quat: c.quaternion.clone(), fov: c.fov }, inside: walk ? { floor: walk.floor } : null, aspect: el ? el.clientWidth / Math.max(1, el.clientHeight) : 16 / 9 });
+  }
+
   function snapshot() {
     const a = api.current;
     if (!a) return;
@@ -521,6 +534,7 @@ export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onE
           <>
             <button className="exit" onClick={onExit}>⬅ Dışarı çık</button>
             <button onClick={snapshot}>📷<span className="lg"> Resim indir</span></button>
+            <button className="ph" onClick={openPhoto}>📸 <span className="lg">Gerçekçi </span>fotoğraf</button>
           </>
         ) : (
           <>
@@ -529,12 +543,14 @@ export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onE
             <button onClick={() => go("side")}>Yan</button>
             <button onClick={() => go("top")}>Üst</button>
             <button onClick={snapshot}>📷<span className="lg"> Resim indir</span></button>
+            <button className="ph" onClick={openPhoto}>📸 <span className="lg">Gerçekçi </span>fotoğraf</button>
           </>
         )}
         <button className={"hq" + (hq ? " on" : "")} onClick={() => setHq((v) => !v)} title="Gerçekçi gölgelendirme (yavaş cihazda kapat)">
           {hq ? <>✨<span className="lg"> Yüksek kalite</span></> : <>⚡<span className="lg"> Hızlı</span></>}
         </button>
       </div>
+      {photo && <Photo full={full} fi={fi} cam={photo.cam} inside={photo.inside} aspect={photo.aspect} name={name} onClose={() => setPhoto(null)} />}
       <div className="compass" aria-label="Kuzey yönü">
         <div ref={compass} className="needle">
           <span>K</span>
