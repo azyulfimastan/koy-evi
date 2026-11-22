@@ -26,9 +26,9 @@ def run(p,name,vp,mobile):
         pg.screenshot(path=f"{OUT}{tag}-{name}-in.png")
         pg.click("text=Dışarı çık >> nth=0"); pg.wait_for_timeout(800)
     if "c" in which:
-        pg.click("text=Kesit: seçili katın içini gör"); pg.wait_for_timeout(3000)
+        pg.click(".chips.seg >> text=Yatay"); pg.wait_for_timeout(3000)
         pg.screenshot(path=f"{OUT}{tag}-{name}-cut.png")
-        pg.click("text=Kesit: seçili katın içini gör"); pg.wait_for_timeout(1500)
+        pg.click(".chips.seg >> text=Yok"); pg.wait_for_timeout(1500)
     if "n" in which:
         pg.locator(".side input[type=range]").first.fill("21"); pg.wait_for_timeout(2500)
         pg.screenshot(path=f"{OUT}{tag}-{name}-night.png")

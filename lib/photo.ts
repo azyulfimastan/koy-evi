@@ -81,7 +81,7 @@ export async function startPhoto(o: PhotoOpts): Promise<PhotoJob> {
   const scene = new THREE.Scene();
 
   // ev + çevre (kesit yok: ışın izleyici kırpma desteklemiyor)
-  const b = buildHouse(f, Math.max(0, f.floors.length - 1), { floors: "all", roof: !o.inside, items: true, cut: false });
+  const b = buildHouse(f, Math.max(0, f.floors.length - 1), { floors: "all", roof: !o.inside, items: true, sec: "none" });
   const night = Math.max(0, Math.min(1, 1 - (d.alt + 6) / 10));
   setNight(b.house, o.inside ? 0 : night);
   scene.add(b.ground, b.house, b.env);

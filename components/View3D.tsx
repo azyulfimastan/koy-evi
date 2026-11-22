@@ -3,14 +3,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { FullData } from "@/lib/types";
-import { buildHouse, disposeTree, floorBases, roomAtPoint, setNight, type V3 } from "@/lib/scene3d";
+import { buildHouse, disposeTree, floorBases, roomAtPoint, setNight, setSecPlane, type V3 } from "@/lib/scene3d";
 import dynamic from "next/dynamic";
 import type { PhotoCam } from "@/lib/photo";
 import { applyLookSun, disposeLook, renderLook, resizeLook, setLookClip, setupLook, type Look } from "@/lib/look";
 
 const Photo = dynamic(() => import("./Photo"), { ssr: false });
 
-type Preset = "corner" | "front" | "side" | "top" | "keep";
+export type Preset = "corner" | "front" | "side" | "top" | "keep";
 
 export type Pick3 =
   | { k: "wall"; id: string; face: "ext" | "int" | "side"; floor: number }
@@ -32,12 +32,15 @@ type Api = {
   hl: THREE.Object3D | null;
   render: () => void;
   framed: boolean;
+  secPlane: THREE.Plane;
   bounds: THREE.Box3;
   kick: () => void;
   userMoved: boolean;
 };
 
-export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onExit }: { full: FullData; fi: number; v3: V3; name: string; walk: Walk; pan: boolean; sel: Pick3 | null; onPick: (p: Pick3 | null) => void; onExit: () => void }) {
+export type View3DCmd = { preset: Preset; n: number };
+
+export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onExit, secPos = 0, secFlip = false, cmd }: { full: FullData; fi: number; v3: V3; name: string; walk: Walk; pan: boolean; sel: Pick3 | null; onPick: (p: Pick3 | null) => void; onExit: () => void; secPos?: number; secFlip?: boolean; cmd?: View3DCmd }) {
   const host = useRef<HTMLDivElement>(null);
   const compass = useRef<HTMLDivElement>(null);
   const api = useRef<Api | null>(null);
@@ -50,6 +53,22 @@ export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onE
   onPickRef.current = onPick;
   const selRef = useRef(sel);
   selRef.current = sel;
+  const secPosRef = useRef(secPos);
+  secPosRef.current = secPos;
+  const secFlipRef = useRef(secFlip);
+  secFlipRef.current = secFlip;
+  const secRef = useRef(v3.sec);
+  secRef.current = v3.sec;
+  // yürürken duvardan geç
+  const [ghost, setGhost] = useState(() => {
+    try {
+      return localStorage.getItem("kte_ghost") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const ghostRef = useRef(ghost);
+  ghostRef.current = ghost;
   const ws = useRef({ yaw: 0, pitch: 0, x: 0, z: 0, y: 1.6, fov: 70 });
   const held = useRef(new Set<string>());
   const raf = useRef(0);
@@ -167,7 +186,7 @@ export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onE
       raf.current = 0;
       const wk = walkRef.current;
       if (!wk || held.current.size === 0) return;
-      const dt = Math.min(0.05, (now - (last || now)) / 1000);
+      const dt = Math.min(0.1, (now - (last || now)) / 1000);
       last = now;
       const w = ws.current;
       const h = held.current;
@@ -184,8 +203,9 @@ export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onE
         const nx = w.x + (-Math.sin(w.yaw) * mv + Math.cos(w.yaw) * st) * sp;
         const nz = w.z + (-Math.cos(w.yaw) * mv - Math.sin(w.yaw) * st) * sp;
         const fl = fullRef.current.floors[wk.floor];
-        if (!blocked(fl, nx, w.z)) w.x = nx;
-        if (!blocked(fl, w.x, nz)) w.z = nz;
+        const free = ghostRef.current;
+        if (free || !blocked(fl, nx, w.z)) w.x = nx;
+        if (free || !blocked(fl, w.x, nz)) w.z = nz;
         camera.position.set(w.x, w.y, w.z);
         lamp.position.x = w.x;
         lamp.position.z = w.z;
@@ -200,7 +220,7 @@ export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onE
         raf.current = requestAnimationFrame(tick);
       }
     };
-    api.current = { renderer, scene, camera, controls, look, lamp, root: null, hl: null, render, framed: false, bounds: new THREE.Box3(), kick, userMoved: false };
+    api.current = { renderer, scene, camera, controls, look, lamp, root: null, hl: null, render, framed: false, secPlane: new THREE.Plane(new THREE.Vector3(0, -1, 0), 1e6), bounds: new THREE.Box3(), kick, userMoved: false };
     resize();
 
     /* ---------- dokunma / fare: seçme + gezinme ---------- */
@@ -223,6 +243,7 @@ export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onE
         const o = h.object as THREE.Mesh;
         const mt = o.material as THREE.Material;
         if (mt && mt.transparent) continue; // cam
+        if (secRef.current !== "none" && a.secPlane.distanceToPoint(h.point) < -0.001) continue; // kesitle gizlenen parça
         let pk: { pick?: string; id?: string; ids?: string[]; face?: string } | null = null;
         for (let p: THREE.Object3D | null = o; p; p = p.parent) {
           if (p.userData.pick) {
@@ -407,8 +428,9 @@ export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onE
     }
     const f = fullRef.current;
     const t0 = performance.now();
-    const { house, ground, env, cutPlane } = buildHouse(f, fi, v3);
-    setLookClip(a.look, v3.cut ? [cutPlane] : []);
+    setSecPlane(a.secPlane, v3.sec, secPosRef.current, secFlipRef.current);
+    const { house, ground, env, cutPlane } = buildHouse(f, fi, v3, a.secPlane);
+    setLookClip(a.look, v3.sec !== "none" ? [a.secPlane] : v3.cut ? [cutPlane] : []);
     (window as unknown as { __v3ms?: number }).__v3ms = Math.round(performance.now() - t0);
     const root = new THREE.Group();
     root.add(ground, house, env);
@@ -421,7 +443,7 @@ export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onE
     f.plot.points.forEach((p) => box.expandByPoint(new THREE.Vector3(p.x, 0, p.y)));
     if (box.isEmpty()) box.setFromCenterAndSize(new THREE.Vector3(0, 1, 0), new THREE.Vector3(10, 2, 10));
     a.bounds = box;
-    const k = `${v3.floors}|${v3.cut}|${fi}`;
+    const k = `${v3.floors}|${v3.cut}|${v3.sec}|${fi}`;
     if (!a.framed) {
       frame(a, house, "corner");
       a.framed = true;
@@ -432,6 +454,32 @@ export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onE
     a.render();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, fi, v3]);
+
+  /* ---------- kesit düzlemi: kaydırınca yeniden kurmadan güncelle ---------- */
+  useEffect(() => {
+    const a = api.current;
+    if (!a) return;
+    setSecPlane(a.secPlane, v3.sec, secPos, secFlip);
+    a.render();
+  }, [secPos, secFlip, v3.sec]);
+
+  /* ---------- dışarıdan kamera komutu (ör. kata tepeden bak) ---------- */
+  useEffect(() => {
+    const a = api.current;
+    if (!a || !cmd || !a.root || walkRef.current) return;
+    frame(a, a.root.children[1], cmd.preset);
+    a.userMoved = true;
+    a.render();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cmd?.n]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("kte_ghost", ghost ? "1" : "0");
+    } catch {
+      /* yok say */
+    }
+  }, [ghost]);
 
   /* ---------- güneş ---------- */
   useEffect(() => {
@@ -533,8 +581,11 @@ export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onE
         {walk ? (
           <>
             <button className="exit" onClick={onExit}>⬅ Dışarı çık</button>
+            <button className={"ghost3" + (ghost ? " on" : "")} onClick={() => setGhost((v) => !v)} title="Yürürken duvarlardan geçebilmek için aç">
+              {ghost ? <>👻 <span className="lg">Duvardan geç: açık</span><span className="sm">Duvar: geç</span></> : <>🧱 <span className="lg">Duvardan geç: kapalı</span><span className="sm">Duvar: dur</span></>}
+            </button>
             <button onClick={snapshot}>📷<span className="lg"> Resim indir</span></button>
-            <button className="ph" onClick={openPhoto}>📸 <span className="lg">Gerçekçi </span>fotoğraf</button>
+            <button className="ph" onClick={openPhoto}>📸<span className="lg"> Gerçekçi fotoğraf</span><span className="sm"> Foto</span></button>
           </>
         ) : (
           <>
@@ -543,7 +594,7 @@ export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onE
             <button onClick={() => go("side")}>Yan</button>
             <button onClick={() => go("top")}>Üst</button>
             <button onClick={snapshot}>📷<span className="lg"> Resim indir</span></button>
-            <button className="ph" onClick={openPhoto}>📸 <span className="lg">Gerçekçi </span>fotoğraf</button>
+            <button className="ph" onClick={openPhoto}>📸<span className="lg"> Gerçekçi fotoğraf</span><span className="sm"> Foto</span></button>
           </>
         )}
         <button className={"hq" + (hq ? " on" : "")} onClick={() => setHq((v) => !v)} title="Gerçekçi gölgelendirme (yavaş cihazda kapat)">

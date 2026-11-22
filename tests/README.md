@@ -25,6 +25,7 @@ Sonra `tests/e2e` klasöründen (görüntüler `tests/shots/` içine düşer):
 | `ucboyut_test.py` | 3D, çevre nesneleri, güneş, odaya girme, dokunarak seçme, iki parmak |
 | `rapor_test.py` | rapor ekranı ve PDF indirme |
 | `rehber_test.py` | adım adım yönlendirme |
+| `kesit_test.py` | yatay/dikey kesit, kata tepeden bakış, duvardan geçme |
 | `yedek_test.py` | şablon, yedek indir/yükle, sürüm geçmişi, çöp kutusu |
 | `performans_test.py` | 3 katlı büyük evde 3D kurulum süresi |
 | `foto_test.py` | gerçekçi fotoğraf modu (küçük boyutta) |

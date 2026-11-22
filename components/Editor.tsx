@@ -10,11 +10,11 @@ import { endJoins, inRegion, rasterize, regionAt, wallGeom } from "@/lib/rooms";
 import type { Region } from "@/lib/rooms";
 import { VERSION } from "./App";
 import dynamic from "next/dynamic";
-import { totalHeight, type V3 } from "@/lib/scene3d";
+import { floorBases, totalHeight, type V3 } from "@/lib/scene3d";
 import { BASE_TEX, EXT_TEX, FLOOR_DEFAULT, FLOOR_TEX, INT_TEX, ROOF_TEX } from "@/lib/textures";
 import type { Finish, EnvKind, EnvObj } from "@/lib/types";
 import { ENV_KINDS, MONTHS, compassName, newEnv, sunPos } from "@/lib/env";
-import type { Pick3, Walk } from "./View3D";
+import type { Pick3, View3DCmd, Walk } from "./View3D";
 
 import Guide from "./Guide";
 const Backup = dynamic(() => import("./Backup"), { ssr: false });
@@ -53,9 +53,12 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
   const [guideOpen, setGuideOpen] = useState(false);
   const is3dRef = useRef(is3d);
   is3dRef.current = is3d;
-  const [v3, setV3] = useState<V3>({ floors: "all", roof: true, items: true, cut: false });
+  const [v3, setV3] = useState<V3>({ floors: "all", roof: true, items: true, sec: "none" });
+  const [secPos, setSecPos] = useState(1.3);
+  const [secFlip, setSecFlip] = useState(false);
+  const [cmd3, setCmd3] = useState<View3DCmd | undefined>(undefined);
   const inWalk = !!walk;
-  const v3eff = useMemo<V3>(() => (inWalk ? { ...v3, cut: false, floors: "all" } : v3), [v3, inWalk]);
+  const v3eff = useMemo<V3>(() => (inWalk ? { ...v3, sec: "none", floors: "all" } : v3), [v3, inWalk]);
   const [cat, setCat] = useState(CATS[0]);
   const [cust, setCust] = useState({ name: "", w: "100", d: "60", h: "75", color: "#d9d3b8" });
   const [saved, setSaved] = useState<Saved>("saved");
@@ -1169,7 +1172,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
       )}
       {showRep && <Report full={full} name={name} onClose={() => setShowRep(false)} />}
       <div className="stage">
-        {is3d && <View3D full={full} fi={fi} v3={v3eff} name={name} walk={walk} pan={pan3} sel={pick3} onPick={setPick3} onExit={() => setWalk(null)} />}
+        {is3d && <View3D full={full} fi={fi} v3={v3eff} name={name} walk={walk} pan={pan3} sel={pick3} onPick={setPick3} onExit={() => setWalk(null)} secPos={secPos} secFlip={secFlip} cmd={cmd3} />}
         <div className="cv" ref={wrap} style={is3d ? { display: "none" } : undefined}>
           <canvas
             ref={cv}
@@ -1288,6 +1291,55 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
                   );
                 })()}
 
+                {!walk && (() => {
+                  // kesit aralığı: evin sınırları ve yüksekliği
+                  const pts = full.floors.flatMap((fl) => fl.walls.flatMap((w) => [w.a, w.b]));
+                  const bb = pts.length ? bounds(pts) : { minX: 0, maxX: 10, minY: 0, maxY: 10 };
+                  const bases = floorBases(full);
+                  const H = Math.max(0.5, totalHeight(full));
+                  const rng: [number, number] = v3.sec === "h" ? [0.1, H] : v3.sec === "x" ? [bb.minX - 0.5, bb.maxX + 0.5] : [bb.minY - 0.5, bb.maxY + 0.5];
+                  const setSec = (sec: V3["sec"]) => {
+                    if (sec === "h") setSecPos(+((bases[fi] ?? 0) + 1.3).toFixed(2));
+                    if (sec === "x") setSecPos(+((bb.minX + bb.maxX) / 2).toFixed(2));
+                    if (sec === "z") setSecPos(+((bb.minY + bb.maxY) / 2).toFixed(2));
+                    setV3({ ...v3, sec });
+                  };
+                  const fromTop = (k: number) => {
+                    setFi(k);
+                    setSecPos(+((bases[k] ?? 0) + 1.3).toFixed(2));
+                    setV3({ ...v3, sec: "h", floors: "upto", roof: false });
+                    setCmd3({ preset: "top", n: Date.now() });
+                  };
+                  return (
+                    <>
+                      <h4>✂️ Kesit</h4>
+                      <div className="chips seg">
+                        {([["none", "Yok"], ["h", "Yatay"], ["x", "Doğu–Batı"], ["z", "Kuzey–Güney"]] as [V3["sec"], string][]).map(([k, l]) => (
+                          <button key={k} className={v3.sec === k ? "on" : ""} onClick={() => setSec(k)}>{l}</button>
+                        ))}
+                      </div>
+                      {v3.sec !== "none" && (
+                        <>
+                          <label className="rng">
+                            <span>{v3.sec === "h" ? "Kesit yüksekliği" : "Kesit yeri"}: <b>{fmt(secPos, 2)} m</b></span>
+                            <input type="range" min={rng[0]} max={rng[1]} step={0.05} value={Math.min(rng[1], Math.max(rng[0], secPos))} onChange={(e) => setSecPos(parseFloat(e.target.value))} aria-label="Kesit yeri" />
+                          </label>
+                          {v3.sec !== "h" && <button onClick={() => setSecFlip((v) => !v)}>⇄ Diğer tarafı göster</button>}
+                          <div className="muted small">Kaydırıcıyı sürükle; düzlemin ötesi gizlenir, kesilen duvarlar koyu görünür.</div>
+                        </>
+                      )}
+                      <h4>🔝 Kata tepeden bak</h4>
+                      <div className="chips seg">
+                        {full.floors.map((fl, k) => (
+                          <button key={fl.id} className={v3.sec === "h" && v3.floors === "upto" && fi === k ? "on" : ""} onClick={() => fromTop(k)}>{fl.name}</button>
+                        ))}
+                        {(v3.sec !== "none" || v3.floors !== "all" || !v3.roof) && (
+                          <button onClick={() => { setV3({ ...v3, sec: "none", floors: "all", roof: true }); setCmd3({ preset: "corner", n: Date.now() }); }}>🏠 Bütün ev</button>
+                        )}
+                      </div>
+                    </>
+                  );
+                })()}
                 <h4>Güneş ve gölge</h4>
                 {(() => {
                   const sp = sunPos(env.sun);
@@ -1332,8 +1384,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
                         <option value="only">Yalnız {full.floors[fi]?.name}</option>
                       </select>
                     </label>
-                    <label className="chk"><input type="checkbox" checked={v3.cut} onChange={(e) => setV3({ ...v3, cut: e.target.checked })} /> Kesit: seçili katın içini gör</label>
-                    <label className="chk"><input type="checkbox" checked={v3.roof} disabled={v3.cut} onChange={(e) => setV3({ ...v3, roof: e.target.checked })} /> Çatıyı göster</label>
+                    <label className="chk"><input type="checkbox" checked={v3.roof} disabled={v3.sec === "h"} onChange={(e) => setV3({ ...v3, roof: e.target.checked })} /> Çatıyı göster{v3.sec === "h" ? " (yatay kesitte gizli)" : ""}</label>
                     <label className="chk"><input type="checkbox" checked={v3.items} onChange={(e) => setV3({ ...v3, items: e.target.checked })} /> Eşyaları göster</label>
                     <label className="chk"><input type="checkbox" checked={pan3} onChange={(e) => setPan3(e.target.checked)} /> Tek parmakla kaydır (telefon)</label>
                     <div className="stats">

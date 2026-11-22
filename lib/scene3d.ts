@@ -12,8 +12,52 @@ export type V3 = {
   floors: "all" | "upto" | "only";
   roof: boolean;
   items: boolean;
-  cut: boolean;
+  /** kesit: yok / yatay (kat planı) / doğu–batı (x) / kuzey–güney (z) */
+  sec: "none" | "h" | "x" | "z";
+  /** eski sabit kesit (yalnızca iç kullanım) */
+  cut?: boolean;
 };
+
+/** Kesit düzlemini ayarla: düzlemin "korunan" tarafı görünür kalır */
+export function setSecPlane(pl: THREE.Plane, sec: V3["sec"], pos: number, flip: boolean) {
+  if (sec === "h") pl.set(new THREE.Vector3(0, -1, 0), pos);
+  else if (sec === "x") pl.set(new THREE.Vector3(flip ? 1 : -1, 0, 0), flip ? -pos : pos);
+  else if (sec === "z") pl.set(new THREE.Vector3(0, 0, flip ? 1 : -1), flip ? -pos : pos);
+  else pl.set(new THREE.Vector3(0, -1, 0), 1e6);
+  return pl;
+}
+
+/**
+ * Evdeki her parçayı kesit düzlemiyle kırp ve kesilen yüzlere koyu dolgu (arka yüz) ekle.
+ * Malzemeler kopyalanır; ortak önbellek bozulmaz. Düzlem nesnesi değişince yeniden kurmaya gerek yok.
+ */
+export function applySection(house: THREE.Object3D, plane: THREE.Plane) {
+  const cap = new THREE.MeshBasicMaterial({ color: CUT_CAP, side: THREE.BackSide, clippingPlanes: [plane] });
+  const clones = new Map<THREE.Material, THREE.Material>();
+  const meshes: THREE.Mesh[] = [];
+  house.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (m.isMesh && !m.userData.isCap) meshes.push(m);
+  });
+  for (const m of meshes) {
+    const src = m.material as THREE.Material;
+    if (Array.isArray(src)) continue;
+    let c = clones.get(src);
+    if (!c) {
+      c = src.clone();
+      c.clippingPlanes = [plane];
+      if (!c.transparent) c.side = THREE.FrontSide;
+      clones.set(src, c);
+    }
+    m.material = c;
+    if (!c.transparent) {
+      const capMesh = new THREE.Mesh(m.geometry, cap);
+      capMesh.userData.isCap = true;
+      capMesh.raycast = () => {}; // dolgu seçilemez
+      m.add(capMesh);
+    }
+  }
+}
 
 export const CUT_H = 1.25; // kesit görünümde duvarların kesildiği yükseklik (m)
 const SLAB = 0.2; // döşeme kalınlığı (m)
@@ -1526,7 +1570,7 @@ export function roomAtPoint(fl: Floor, x: number, y: number) {
 }
 
 /** Tüm 3B sahneyi kur. house: ev parçaları (kadraj için), ground: zemin, env: çevre. */
-export function buildHouse(f: FullData, fi: number, v: V3) {
+export function buildHouse(f: FullData, fi: number, v: V3, secPlane?: THREE.Plane) {
   const house = new THREE.Group();
   const ground = new THREE.Group();
   const env = new THREE.Group();
@@ -1548,20 +1592,21 @@ export function buildHouse(f: FullData, fi: number, v: V3) {
     const m = v.cut && i === topShown ? clipped : plain;
     buildSlab(fl, i > 0 ? f.floors[i - 1] : null, bases[i], plain, fg);
     buildRoomFloors(fl, i > 0 ? f.floors[i - 1] : null, bases[i], m.clip, fg);
-    buildWalls(fl, bases[i], m, v.cut && i === topShown, fg, i);
+    buildWalls(fl, bases[i], m, !!v.cut && i === topShown, fg, i);
     for (const st of fl.stairs) buildStair(st, fl.height, bases[i], m, fg);
     if (v.items) for (const it of fl.items) buildItem(it, bases[i], m, fg);
   }
   // çatı: yalnızca en üst katlar gösteriliyorsa ve kesit kapalıysa
   let topWalls = -1;
   f.floors.forEach((fl, i) => fl.walls.length && (topWalls = i));
-  const roofShown = v.roof && !v.cut && topWalls >= 0 && hi >= topWalls && lo <= topWalls;
+  const roofShown = v.roof && !v.cut && v.sec !== "h" && topWalls >= 0 && hi >= topWalls && lo <= topWalls;
   if (roofShown) {
     const rg = new THREE.Group();
     rg.userData = { floor: topWalls };
     buildRoof(f, bases[topWalls] + f.floors[topWalls].height, plain, rg);
     house.add(rg);
   }
+  if (v.sec !== "none" && secPlane) applySection(house, secPlane);
   buildGround(f, ground);
   buildEnv(f.env.objs, env);
   return { house, ground, env, roofShown, cutPlane };

@@ -258,3 +258,13 @@ button.ghost { border-color: transparent; background: transparent; font-size: 17
   .tpls { grid-template-columns: 1fr 1fr; }
   .hrow, .trow { flex-wrap: wrap; }
 }
+
+/* v1.3 kesit */
+.chips.seg { display: flex; flex-wrap: wrap; gap: 6px; }
+.chips.seg button { padding: 7px 11px; font-size: 14px; }
+.chips.seg button.on { background: #3f6b2a; border-color: #3f6b2a; color: #fff; }
+.v3bar .ghost3 { background: rgba(255,255,255,.92); }
+.v3bar .ghost3.on { background: #efe3ff; border-color: #b49ae0; }
+@media (max-width: 640px) {
+  .v3bar { flex-wrap: wrap; row-gap: 6px; }
+}

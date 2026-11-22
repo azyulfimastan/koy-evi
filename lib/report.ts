@@ -28,7 +28,7 @@ export function render3d(f: FullData, dir: [number, number, number], w = 1100, h
   const look = setupLook(renderer, scene, { shadow, composer: true, msaa: 4 });
   look.composer?.setSize(w, h);
   const top = Math.max(0, f.floors.length - 1);
-  const b = buildHouse(f, top, { floors: "all", roof: true, items: true, cut: false });
+  const b = buildHouse(f, top, { floors: "all", roof: true, items: true, sec: "none" });
   b.house.traverse((o) => {
     const m = o as THREE.Mesh;
     if (m.isMesh) {
