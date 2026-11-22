@@ -1,7 +1,9 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Opening, PlanData, Pt, Room, Wall } from "@/lib/types";
-import { normalizeData, uid } from "@/lib/types";
+import type { FullData, Floor, Opening, PlanData, Pt, Room, Stair, Wall } from "@/lib/types";
+import { flatten, newFloor, normalizeFull, uid, unflatten, defaultFull } from "@/lib/types";
+import { roofInfo, ATTIC_MIN } from "@/lib/roof";
+import { drawStair, stairBox, stairLocal, stairSteps } from "@/lib/stairs";
 import { area, bounds, dist, fmt, perimeter, round3, setEdgeLength, snapTo, segProject } from "@/lib/geo";
 import { endJoins, inRegion, rasterize, regionAt, wallGeom } from "@/lib/rooms";
 import type { Region } from "@/lib/rooms";
@@ -9,15 +11,16 @@ import { VERSION } from "./App";
 
 type View = { s: number; ox: number; oy: number };
 type Saved = "saved" | "saving" | "error";
-type Tool = "select" | "plot" | "wall" | "door" | "window" | "room";
+type Tool = "select" | "plot" | "wall" | "door" | "window" | "room" | "stair" | "roof";
 type Sel =
   | null
   | { k: "pv"; i: number }
   | { k: "wall"; id: string }
   | { k: "op"; id: string }
-  | { k: "room"; id: string };
+  | { k: "room"; id: string }
+  | { k: "stair"; id: string };
 
-const clone = (d: PlanData): PlanData => JSON.parse(JSON.stringify(d));
+const cloneF = (d: FullData): FullData => JSON.parse(JSON.stringify(d));
 const ROOM_COLORS = ["#f2d9a6", "#bfe0c4", "#c9d9f0", "#f0c9c9", "#e4d0f0", "#f0e6a8"];
 const WALL_COLOR = "#7a7266";
 const near = (a: Pt, b: Pt, e = 0.002) => Math.hypot(a.x - b.x, a.y - b.y) < e;
@@ -29,6 +32,8 @@ const TOOL_HINT: Record<Tool, string> = {
   door: "Kapı koymak istediğin duvara dokun.",
   window: "Pencere koymak istediğin duvara dokun.",
   room: "Duvarlarla kapalı bir alanın içine dokun, oda otomatik oluşur.",
+  stair: "Merdivenin yerleşeceği noktaya dokun. Basamak sayısı kat yüksekliğinden hesaplanır.",
+  roof: "Çatı türünü ve eğimini panelden ayarla. Taslak, en üst katın dış sınırına göre çizilir.",
 };
 
 export default function Editor({ id, onBack }: { id: string; onBack: () => void }) {
@@ -36,7 +41,8 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
   const cv = useRef<HTMLCanvasElement>(null);
 
   const [name, setName] = useState("");
-  const [data, setData] = useState<PlanData>(normalizeData(null));
+  const [full, setFull] = useState<FullData>(defaultFull());
+  const [fi, setFi] = useState(0);
   const [view, setView] = useState<View>({ s: 40, ox: 0, oy: 0 });
   const [tool, setTool] = useState<Tool>("plot");
   const [sel, setSel] = useState<Sel>(null);
@@ -48,8 +54,16 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
   const [panel, setPanel] = useState(true);
   const [, bump] = useState(0);
 
-  const past = useRef<PlanData[]>([]);
-  const future = useRef<PlanData[]>([]);
+  const fullRef = useRef(full);
+  fullRef.current = full;
+  const fiRef = useRef(fi);
+  fiRef.current = fi;
+  const data = useMemo<PlanData>(() => flatten(full, fi), [full, fi]);
+  const setData = useCallback((next: PlanData) => setFull((prev) => unflatten(prev, fiRef.current, next)), []);
+  const cloneFull = () => cloneF(fullRef.current);
+
+  const past = useRef<FullData[]>([]);
+  const future = useRef<FullData[]>([]);
   const dataRef = useRef(data);
   dataRef.current = data;
   const viewRef = useRef(view);
@@ -63,7 +77,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
   const selRef = useRef(sel);
   selRef.current = sel;
 
-  const { plot, walls, openings, rooms } = data;
+  const { plot, walls, openings, rooms, stairs } = data;
 
   // ---------- türetilmiş veri ----------
   const joins = useMemo(() => endJoins(walls), [walls]);
@@ -109,12 +123,13 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
       .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then((p) => {
         if (dead) return;
-        const d = normalizeData(p.data);
+        const d = normalizeFull(p.data);
         setName(p.name);
-        setData(d);
+        setFull(d);
+        setFi(0);
         setTool(d.plot.closed ? "select" : "plot");
         setLoaded(true);
-        requestAnimationFrame(() => fit(d));
+        requestAnimationFrame(() => fit(flatten(d, 0)));
       })
       .catch(() => {
         if (!dead) onBack();
@@ -139,7 +154,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
         const r = await fetch("/api/projects/" + id, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name, data }),
+          body: JSON.stringify({ name, data: full }),
         });
         setSaved(r.ok ? "saved" : "error");
       } catch {
@@ -147,7 +162,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
       }
     }, 700);
     return () => clearTimeout(t);
-  }, [data, name, loaded, id]);
+  }, [full, name, loaded, id]);
 
   useEffect(() => {
     if (!note) return;
@@ -156,24 +171,25 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
   }, [note]);
 
   // ---------- geçmiş ----------
-  const commit = useCallback((before: PlanData) => {
-    past.current.push(clone(before));
+  const commit = useCallback((before: FullData) => {
+    past.current.push(cloneF(before));
     if (past.current.length > 200) past.current.shift();
     future.current = [];
     bump((n) => n + 1);
   }, []);
   const apply = useCallback(
     (next: PlanData) => {
-      commit(dataRef.current);
+      commit(fullRef.current);
       setData(next);
     },
-    [commit]
+    [commit, setData]
   );
   const undo = useCallback(() => {
     const p = past.current.pop();
     if (!p) return;
-    future.current.push(clone(dataRef.current));
-    setData(p);
+    future.current.push(cloneF(fullRef.current));
+    setFull(p);
+    setFi((f) => Math.min(f, p.floors.length - 1));
     setSel(null);
     setChain(null);
     bump((n) => n + 1);
@@ -181,8 +197,9 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
   const redo = useCallback(() => {
     const p = future.current.pop();
     if (!p) return;
-    past.current.push(clone(dataRef.current));
-    setData(p);
+    past.current.push(cloneF(fullRef.current));
+    setFull(p);
+    setFi((f) => Math.min(f, p.floors.length - 1));
     setSel(null);
     bump((n) => n + 1);
   }, []);
@@ -195,6 +212,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
     const H = el.clientHeight;
     const pts: Pt[] = [...d.plot.points];
     d.walls.forEach((w) => pts.push(w.a, w.b));
+    d.stairs.forEach((st) => pts.push({ x: st.x, y: st.y }));
     if (pts.length < 2) {
       setView({ s: 40, ox: W / 2 - 15 * 40, oy: H / 2 - 10 * 40 });
       return;
@@ -373,6 +391,34 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
       g.drawImage(cvs, reg.x0 * s + ox, reg.y0 * s + oy, reg.w * reg.cell * s, reg.h * reg.cell * s);
     }
 
+    // alt katın hayaleti
+    const polyGhost = (a: Pt, b: Pt, n: Pt, half: number) => {
+      const p1 = S({ x: a.x + n.x * half, y: a.y + n.y * half });
+      const p2 = S({ x: b.x + n.x * half, y: b.y + n.y * half });
+      const p3 = S({ x: b.x - n.x * half, y: b.y - n.y * half });
+      const p4 = S({ x: a.x - n.x * half, y: a.y - n.y * half });
+      g.beginPath();
+      g.moveTo(p1.x, p1.y);
+      g.lineTo(p2.x, p2.y);
+      g.lineTo(p3.x, p3.y);
+      g.lineTo(p4.x, p4.y);
+      g.closePath();
+    };
+    if (fi > 0) {
+      const below = full.floors[fi - 1];
+      const bj = endJoins(below.walls);
+      for (const w of below.walls) {
+        const { L, u, n, ea, eb } = wallGeom(w, bj.get(w.id));
+        polyGhost({ x: w.a.x - u.x * ea, y: w.a.y - u.y * ea }, { x: w.a.x + u.x * (L + eb), y: w.a.y + u.y * (L + eb) }, n, w.t / 2);
+        g.fillStyle = "rgba(90,80,70,0.13)";
+        g.fill();
+        g.strokeStyle = "rgba(90,80,70,0.35)";
+        g.lineWidth = 1;
+        g.stroke();
+      }
+      for (const st of below.stairs) drawStair(g, st, below.height, s, ox, oy, { color: "rgba(90,80,70,0.55)", fill: "rgba(0,0,0,0)", lw: 1.5, ghost: true });
+    }
+
     // duvarlar
     const poly = (a: Pt, b: Pt, n: Pt, half: number) => {
       const p1 = S({ x: a.x + n.x * half, y: a.y + n.y * half });
@@ -459,6 +505,17 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
           g.setLineDash([]);
         }
       }
+    }
+
+    // merdivenler
+    for (const st of stairs) {
+      const isSel = sel?.k === "stair" && sel.id === st.id;
+      drawStair(g, st, data.height, s, ox, oy, { color: isSel ? "#d9822b" : "#3d382f", fill: "rgba(255,255,255,0.7)", lw: isSel ? 2.5 : 1.3 });
+    }
+    // alttaki katın merdiveni burada boşluk olarak görünür (hayalet çizildi)
+    if (tool === "stair" && hover) {
+      const prev: Stair = { id: "p", kind: "straight", x: hover.x, y: hover.y, rot: 0, w: 1, mirror: false };
+      drawStair(g, prev, data.height, s, ox, oy, { color: "#d9822b", fill: "rgba(217,130,43,0.25)", lw: 1.5 });
     }
 
     // duvar çizim önizlemesi
@@ -607,6 +664,61 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
       const sgn = nx * (mid.x - cxw) + ny * (mid.y - cyw) >= 0 ? 1 : -1;
       label(g, fmt(L) + " m", (a.x + b.x) / 2 + nx * off * sgn, (a.y + b.y) / 2 + ny * off * sgn, isSel ? "#8a4b0b" : "#6a6454", isSel);
     }
+    // çatı taslağı
+    if (tool === "roof") {
+      const ri = roofInfo(full);
+      if (ri) {
+        const a = S({ x: ri.x0, y: ri.y0 });
+        const b = S({ x: ri.x1, y: ri.y1 });
+        const kind = full.roof.kind;
+        g.fillStyle = full.roof.color + "33";
+        g.fillRect(a.x, a.y, b.x - a.x, b.y - a.y);
+        g.setLineDash([9, 6]);
+        g.strokeStyle = full.roof.color;
+        g.lineWidth = 2.5;
+        g.strokeRect(a.x, a.y, b.x - a.x, b.y - a.y);
+        g.setLineDash([]);
+        const cx2 = (a.x + b.x) / 2;
+        const cy2 = (a.y + b.y) / 2;
+        g.lineWidth = 3;
+        if (kind === "gable") {
+          g.beginPath();
+          if (ri.ridgeAlongX) {
+            g.moveTo(a.x, cy2);
+            g.lineTo(b.x, cy2);
+          } else {
+            g.moveTo(cx2, a.y);
+            g.lineTo(cx2, b.y);
+          }
+          g.stroke();
+        } else if (kind === "hip") {
+          const inset = (ri.spanDim / 2) * s;
+          g.beginPath();
+          if (ri.ridgeAlongX) {
+            g.moveTo(a.x + inset, cy2);
+            g.lineTo(b.x - inset, cy2);
+          } else {
+            g.moveTo(cx2, a.y + inset);
+            g.lineTo(cx2, b.y - inset);
+          }
+          g.stroke();
+          for (const [x, y] of [[a.x, a.y], [b.x, a.y], [a.x, b.y], [b.x, b.y]]) {
+            const tx = ri.ridgeAlongX ? (x < cx2 ? a.x + inset : b.x - inset) : cx2;
+            const ty = ri.ridgeAlongX ? cy2 : y < cy2 ? a.y + inset : b.y - inset;
+            g.beginPath();
+            g.moveTo(x, y);
+            g.lineTo(tx, ty);
+            g.lineWidth = 1.5;
+            g.stroke();
+          }
+        } else if (kind === "shed") {
+          label(g, "yüksek kenar → alçak kenar", cx2, cy2, full.roof.color);
+        } else {
+          label(g, "düz çatı", cx2, cy2, full.roof.color);
+        }
+      }
+    }
+
     // ölçek çubuğu
     const nice = [0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500];
     const m = nice.find((n) => n * s >= 80) ?? 500;
@@ -626,7 +738,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
     g.textBaseline = "bottom";
     g.fillText(m >= 1 ? `${m} m` : `${m * 100} cm`, bx + 4, by - 6);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, view, sel, hover, chain, tool, regions, roomCanvases, joins]);
+  }, [data, full, fi, view, sel, hover, chain, tool, regions, roomCanvases, joins]);
 
   useEffect(() => {
     draw();
@@ -644,10 +756,11 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
   type Drag =
     | null
     | { kind: "pan"; sx: number; sy: number; ox: number; oy: number; moved: boolean; click?: () => void }
-    | { kind: "pv"; i: number; before: PlanData }
-    | { kind: "wend"; id: string; which: "a" | "b"; from: Pt; before: PlanData }
-    | { kind: "wmove"; id: string; start: Pt; a0: Pt; b0: Pt; before: PlanData; moved: boolean }
-    | { kind: "op"; id: string; before: PlanData; moved: boolean }
+    | { kind: "pv"; i: number; before: FullData }
+    | { kind: "wend"; id: string; which: "a" | "b"; from: Pt; before: FullData }
+    | { kind: "wmove"; id: string; start: Pt; a0: Pt; b0: Pt; before: FullData; moved: boolean }
+    | { kind: "op"; id: string; before: FullData; moved: boolean }
+    | { kind: "smove"; id: string; start: Pt; x0: number; y0: number; before: FullData; moved: boolean }
     | { kind: "pinch"; d: number; s: number; cx: number; cy: number };
   const drag = useRef<Drag>(null);
 
@@ -705,14 +818,14 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
         const vi = hitPlotVertex(p.x, p.y);
         if (vi >= 0) {
           setSel({ k: "pv", i: vi });
-          drag.current = { kind: "pv", i: vi, before: clone(d) };
+          drag.current = { kind: "pv", i: vi, before: cloneFull() };
           return;
         }
         const mi = hitPlotMid(p.x, p.y);
         if (mi >= 0) {
           const a = d.plot.points[mi];
           const b = d.plot.points[(mi + 1) % d.plot.points.length];
-          const before = clone(d);
+          const before = cloneFull();
           const pts = d.plot.points.map((q) => ({ ...q }));
           pts.splice(mi + 1, 0, sn({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }));
           setData({ ...d, plot: { ...d.plot, points: pts } });
@@ -796,6 +909,19 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
       return;
     }
 
+    if (t === "stair") {
+      drag.current = pan(() => {
+        const cur = dataRef.current;
+        const pos = sn(toWorld(p.x, p.y));
+        const st: Stair = { id: uid(), kind: "straight", x: pos.x, y: pos.y, rot: 0, w: 1, mirror: false };
+        apply({ ...cur, stairs: [...cur.stairs, st] });
+        setSel({ k: "stair", id: st.id });
+        setTool("select");
+        setHover(null);
+      });
+      return;
+    }
+
     if (t === "room") {
       drag.current = pan(() => {
         const cur = dataRef.current;
@@ -834,22 +960,31 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
         for (const which of ["a", "b"] as const) {
           const q = toScreen(wl[which]);
           if (Math.hypot(q.x - p.x, q.y - p.y) <= R) {
-            drag.current = { kind: "wend", id: wl.id, which, from: { ...wl[which] }, before: clone(d) };
+            drag.current = { kind: "wend", id: wl.id, which, from: { ...wl[which] }, before: cloneFull() };
             return;
           }
         }
       }
     }
+    for (const st of d.stairs) {
+      const lp = stairLocal(st, w);
+      const bx = stairBox(st, d.height);
+      if (Math.abs(lp.x) <= bx.W / 2 && Math.abs(lp.y) <= bx.D / 2) {
+        setSel({ k: "stair", id: st.id });
+        drag.current = { kind: "smove", id: st.id, start: w, x0: st.x, y0: st.y, before: cloneFull(), moved: false };
+        return;
+      }
+    }
     const op = hitOpening(w);
     if (op) {
       setSel({ k: "op", id: op.id });
-      drag.current = { kind: "op", id: op.id, before: clone(d), moved: false };
+      drag.current = { kind: "op", id: op.id, before: cloneFull(), moved: false };
       return;
     }
     const wl = hitWall(w);
     if (wl) {
       setSel({ k: "wall", id: wl.id });
-      drag.current = { kind: "wmove", id: wl.id, start: w, a0: { ...wl.a }, b0: { ...wl.b }, before: clone(d), moved: false };
+      drag.current = { kind: "wmove", id: wl.id, start: w, a0: { ...wl.a }, b0: { ...wl.b }, before: cloneFull(), moved: false };
       return;
     }
     const rs = rasterize(d.walls);
@@ -874,6 +1009,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
       if (t === "wall") setHover(snapWall(wpt, chainRef.current));
       else if (t === "plot" && !dataRef.current.plot.closed) setHover(sn(wpt));
       else if (t === "door" || t === "window") setHover(wpt);
+      else if (t === "stair") setHover(sn(wpt));
     };
     if (!d) {
       updateHover();
@@ -929,7 +1065,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
       const ddx = na.x - d.a0.x;
       const ddy = na.y - d.a0.y;
       // bağlı uçlarla birlikte taşı
-      const base = d.before.walls;
+      const base = flatten(d.before, fiRef.current).walls;
       const nb = { x: round3(d.b0.x + ddx), y: round3(d.b0.y + ddy) };
       const walls2 = base.map((w) => {
         const nw = { ...w };
@@ -943,6 +1079,14 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
         return nw;
       });
       setData({ ...cur, walls: walls2 });
+    } else if (d.kind === "smove") {
+      const cur = dataRef.current;
+      const dx = wpt.x - d.start.x;
+      const dy = wpt.y - d.start.y;
+      if (!d.moved && Math.hypot(dx, dy) * viewRef.current.s < 6) return;
+      d.moved = true;
+      const np = sn({ x: d.x0 + dx, y: d.y0 + dy });
+      setData({ ...cur, stairs: cur.stairs.map((q) => (q.id === d.id ? { ...q, x: np.x, y: np.y } : q)) });
     } else if (d.kind === "op") {
       const cur = dataRef.current;
       const o = cur.openings.find((x) => x.id === d.id);
@@ -963,10 +1107,10 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
       if (!d.moved) d.click?.();
       return;
     }
-    const now = dataRef.current;
     if (d.kind === "wmove" && !d.moved) return;
+    if (d.kind === "smove" && !d.moved) return;
     if (d.kind === "op" && !d.moved) return;
-    if (JSON.stringify(now) !== JSON.stringify(d.before)) commit(d.before);
+    if (JSON.stringify(fullRef.current) !== JSON.stringify(d.before)) commit(d.before);
   }
 
   useEffect(() => {
@@ -1001,6 +1145,8 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
       apply({ ...d, openings: d.openings.filter((o) => o.id !== s.id) });
     } else if (s.k === "room") {
       apply({ ...d, rooms: d.rooms.filter((r) => r.id !== s.id) });
+    } else if (s.k === "stair") {
+      apply({ ...d, stairs: d.stairs.filter((q) => q.id !== s.id) });
     }
     setSel(null);
   }
@@ -1013,6 +1159,39 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
   }
   const patchWall = (id: string, f: (w: Wall) => Wall) => apply({ ...dataRef.current, walls: dataRef.current.walls.map((w) => (w.id === id ? f(w) : w)) });
   const patchOp = (id: string, f: (o: Opening) => Opening) => apply({ ...dataRef.current, openings: dataRef.current.openings.map((o) => (o.id === id ? f(o) : o)) });
+  const patchStair = (id: string, f: (q: Stair) => Stair) => apply({ ...dataRef.current, stairs: dataRef.current.stairs.map((q) => (q.id === id ? f(q) : q)) });
+  function chooseFloor(i: number) {
+    setFi(i);
+    setSel(null);
+    setChain(null);
+    chainFirst.current = null;
+    setHover(null);
+  }
+  function addFloor() {
+    const f = fullRef.current;
+    commit(f);
+    const nf = newFloor(`${f.floors.length}. kat`);
+    setFull({ ...f, floors: [...f.floors, nf] });
+    setFi(f.floors.length);
+    setSel(null);
+    setTool("select");
+  }
+  function deleteFloor() {
+    const f = fullRef.current;
+    if (f.floors.length <= 1) return;
+    commit(f);
+    setFull({ ...f, floors: f.floors.filter((_, k) => k !== fiRef.current) });
+    setFi(Math.max(0, fiRef.current - 1));
+    setSel(null);
+  }
+  function copyBelow() {
+    const f = fullRef.current;
+    const i = fiRef.current;
+    if (i < 1) return;
+    commit(f);
+    const copy = f.floors[i - 1].walls.map((w) => ({ ...w, id: uid(), a: { ...w.a }, b: { ...w.b } }));
+    setFull({ ...f, floors: f.floors.map((fl, k) => (k === i ? { ...fl, walls: [...fl.walls, ...copy] } : fl)) });
+  }
   const patchRoom = (id: string, f: (r: Room) => Room) => apply({ ...dataRef.current, rooms: dataRef.current.rooms.map((r) => (r.id === id ? f(r) : r)) });
 
   useEffect(() => {
@@ -1046,6 +1225,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
   const selOp = sel?.k === "op" ? openings.find((o) => o.id === sel.id) : undefined;
   const selOpWall = selOp ? walls.find((w) => w.id === selOp.wall) : undefined;
   const selRoom = sel?.k === "room" ? rooms.find((r) => r.id === sel.id) : undefined;
+  const selStair = sel?.k === "stair" ? stairs.find((q) => q.id === sel.id) : undefined;
   const totalRoomArea = rooms.reduce((s, r) => {
     const reg = regions.get(r.id);
     return s + (reg && !reg.open ? reg.area : 0);
@@ -1070,6 +1250,8 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
     ["door", "Kapı"],
     ["window", "Pencere"],
     ["room", "Oda"],
+    ["stair", "Merdiven"],
+    ["roof", "Çatı"],
   ];
 
   return (
@@ -1081,6 +1263,14 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
         <span className="ver">Köy Evi Tasarım {VERSION}</span>
       </div>
 
+      <div className="tools floors">
+        {full.floors.map((fl, i) => (
+          <button key={fl.id} className={fi === i ? "on" : ""} onClick={() => chooseFloor(i)}>
+            {fl.name}
+          </button>
+        ))}
+        <button className="add" onClick={addFloor}>+ Kat</button>
+      </div>
       <div className="tools modes">
         {modes.map(([t, l]) => (
           <button key={t} className={tool === t ? "on" : ""} onClick={() => chooseTool(t)}>
@@ -1276,10 +1466,103 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
               </>
             )}
 
-            {/* --- Genel --- */}
-            {tool !== "plot" && !selWall && !selOp && !selRoom && (
+            {/* --- Merdiven --- */}
+            {tool !== "plot" && selStair && (
               <>
-                <h3>Plan</h3>
+                <h3>Merdiven</h3>
+                <label className="edge">
+                  <span>Tür</span>
+                  <select value={selStair.kind} onChange={(e) => patchStair(selStair.id, (q) => ({ ...q, kind: e.target.value as Stair["kind"] }))}>
+                    <option value="straight">Düz</option>
+                    <option value="L">L şeklinde</option>
+                    <option value="U">U şeklinde</option>
+                    <option value="spiral">Sarmal</option>
+                  </select>
+                </label>
+                <NumField key={selStair.id + ":w:" + selStair.w} label="Genişlik (cm)" value={selStair.w * 100} decimals={0}
+                  onCommit={(v) => patchStair(selStair.id, (q) => ({ ...q, w: round3(Math.max(0.6, Math.min(2, v / 100))) }))} />
+                <div className="row">
+                  <button onClick={() => patchStair(selStair.id, (q) => ({ ...q, rot: (q.rot + 90) % 360 }))}>↻ 90° döndür</button>
+                  <button onClick={() => patchStair(selStair.id, (q) => ({ ...q, mirror: !q.mirror }))}>Aynala</button>
+                </div>
+                {(() => {
+                  const st = stairSteps(data.height);
+                  const bx = stairBox(selStair, data.height);
+                  return (
+                    <div className="stats">
+                      <div><span>Basamak</span><b>{st.risers} × {fmt(st.riser * 100, 1)} cm</b></div>
+                      <div><span>Kapladığı alan</span><b>{fmt(bx.W)} × {fmt(bx.D)} m</b></div>
+                    </div>
+                  );
+                })()}
+                <div className="muted small">Basamak sayısı, bu katın yüksekliğinden ({fmt(data.height * 100, 0)} cm) hesaplanır. Üst katta merdiven boşluğu kesikli çizgiyle görünür.</div>
+                <button className="danger" onClick={deleteSel}>Merdiveni sil</button>
+              </>
+            )}
+
+            {/* --- Çatı --- */}
+            {tool === "roof" && (
+              <>
+                <h3>Çatı</h3>
+                <label className="edge">
+                  <span>Tür</span>
+                  <select value={full.roof.kind} onChange={(e) => apply({ ...data, roof: { ...full.roof, kind: e.target.value as FullData["roof"]["kind"] } })}>
+                    <option value="gable">Beşik (iki yöne eğimli)</option>
+                    <option value="hip">Kırma (dört yöne eğimli)</option>
+                    <option value="shed">Tek eğimli</option>
+                    <option value="flat">Düz</option>
+                  </select>
+                </label>
+                {full.roof.kind !== "flat" && (
+                  <NumField key={"pitch" + full.roof.pitch} label="Eğim (derece)" value={full.roof.pitch} decimals={0}
+                    onCommit={(v) => apply({ ...data, roof: { ...full.roof, pitch: Math.max(5, Math.min(70, Math.round(v))) } })} />
+                )}
+                <NumField key={"ov" + full.roof.overhang} label="Saçak çıkıntısı (cm)" value={full.roof.overhang * 100} decimals={0}
+                  onCommit={(v) => apply({ ...data, roof: { ...full.roof, overhang: round3(Math.max(0, Math.min(2, v / 100))) } })} />
+                {(full.roof.kind === "gable" || full.roof.kind === "hip" || full.roof.kind === "shed") && (
+                  <label className="edge">
+                    <span>Mahya yönü</span>
+                    <select value={full.roof.ridge} onChange={(e) => apply({ ...data, roof: { ...full.roof, ridge: e.target.value as FullData["roof"]["ridge"] } })}>
+                      <option value="auto">Otomatik (uzun kenar)</option>
+                      <option value="x">Yatay (sağ-sol)</option>
+                      <option value="y">Dikey (yukarı-aşağı)</option>
+                    </select>
+                  </label>
+                )}
+                <label className="edge">
+                  <span>Renk</span>
+                  <input type="color" value={full.roof.color} onChange={(e) => apply({ ...data, roof: { ...full.roof, color: e.target.value } })} />
+                </label>
+                {(() => {
+                  const ri = roofInfo(full);
+                  if (!ri) return <div className="muted small">Çatıyı görmek için önce duvarları çiz.</div>;
+                  return (
+                    <>
+                      <div className="stats">
+                        <div><span>Tepe yüksekliği</span><b>{full.roof.kind === "flat" ? "—" : fmt(ri.ridgeHeight) + " m"}</b></div>
+                        <div><span>Tavan arası ({fmt(ATTIC_MIN)} m üstü)</span><b>{ri.usable > 0 ? fmt(ri.usable) + " m²" : "yok"}</b></div>
+                      </div>
+                      <div className="muted small">Çatı, en üst katın dış sınırına göre hesaplanır. Tavan arasını kat olarak kullanmak istersen “+ Kat” ile ekleyip duvarlarını alt kattan kopyalayabilirsin.</div>
+                    </>
+                  );
+                })()}
+              </>
+            )}
+
+            {/* --- Genel --- */}
+            {tool !== "plot" && tool !== "roof" && !selWall && !selOp && !selRoom && !selStair && (
+              <>
+                <h3>{data.name}</h3>
+                <label className="edge">
+                  <span>Kat adı</span>
+                  <input value={data.name} onChange={(e) => setData({ ...data, name: e.target.value })} onBlur={() => bump((n) => n + 1)} />
+                </label>
+                <NumField key={"fh" + fi + data.height} label="Kat yüksekliği (cm)" value={data.height * 100} decimals={0}
+                  onCommit={(v) => apply({ ...data, height: round3(Math.max(2, Math.min(5, v / 100))) })} />
+                <div className="row">
+                  {fi > 0 && <button onClick={copyBelow}>Alt katın duvarlarını kopyala</button>}
+                  {full.floors.length > 1 && <button className="danger" onClick={deleteFloor}>Bu katı sil</button>}
+                </div>
                 <div className="stats">
                   <div><span>Arsa</span><b>{plot.closed ? fmt(area(plot.points)) + " m²" : "—"}</b></div>
                   <div><span>Oda toplamı</span><b>{fmt(totalRoomArea)} m²</b></div>

@@ -81,3 +81,7 @@ input, select { border: 1px solid var(--line); border-radius: 8px; padding: 8px 
 }
 
 .pushb { margin-top: auto; padding-top: 10px; }
+
+.floors { background: #efe9d6; }
+.floors button.on { background: #2a2a24; border-color: #2a2a24; color: #fff; }
+.floors button.add { border-style: dashed; }

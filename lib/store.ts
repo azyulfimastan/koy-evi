@@ -2,7 +2,7 @@ import { put, list, get, del } from "@vercel/blob";
 import fs from "fs/promises";
 import path from "path";
 
-import { defaultData } from "./types";
+import { defaultFull } from "./types";
 import type { Project } from "./types";
 export type { Pt, Plot, Project } from "./types";
 
@@ -73,6 +73,6 @@ export function newProject(name: string): Project {
     name: name.trim().slice(0, 80) || "Yeni ev",
     createdAt: now,
     updatedAt: now,
-    data: defaultData(),
+    data: defaultFull(),
   };
 }
