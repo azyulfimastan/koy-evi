@@ -6,7 +6,7 @@ import { drawStair } from "@/lib/stairs";
 import { drawItem } from "@/lib/furniture";
 import { dist, fmt } from "@/lib/geo";
 import { ENV_KINDS, drawEnv } from "@/lib/env";
-import { fillMaskWithPattern, floorColor, texPattern } from "@/lib/plan2d";
+import { floorColor, roomImage, texPattern } from "@/lib/plan2d";
 import { WALL_COLOR, defaults, type Sel, type Tool, type View } from "./shared";
 
 export type PlanState = {
@@ -107,13 +107,9 @@ export function drawPlan(c: HTMLCanvasElement, el: HTMLDivElement, st: PlanState
     const cvs = roomCanvases.get(r.id);
     const reg = regions.get(r.id);
     if (!cvs || !reg) continue;
-    const rx = reg.x0 * s + ox;
-    const ry = reg.y0 * s + oy;
-    const rw = reg.w * reg.cell * s;
-    const rh = reg.h * reg.cell * s;
     const tex = r.floor && r.floor !== "none" ? r.floor : "";
-    const pat = tex ? texPattern(g, tex, floorColor(r.floor, r.floorColor, r.color), s, ox, oy) : null;
-    fillMaskWithPattern(g, cvs, rx, ry, rw, rh, pat ?? r.color + "c0", dpr);
+    const img = roomImage(g, cvs, reg, tex, floorColor(r.floor, r.floorColor, r.color), r.color + "c0");
+    if (img) g.drawImage(img.cv, img.x * s + ox, img.y * s + oy, img.w * s, img.h * s);
   }
 
   // alt katın hayaleti

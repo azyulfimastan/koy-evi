@@ -4,7 +4,7 @@ import Login from "./Login";
 import ProjectList from "./ProjectList";
 import Editor from "./Editor";
 
-export const VERSION = "v1.3";
+export const VERSION = "v1.4";
 
 export default function App() {
   const [auth, setAuth] = useState<null | boolean>(null);

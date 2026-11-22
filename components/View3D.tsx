@@ -100,7 +100,10 @@ export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onE
 
     const scene = new THREE.Scene();
     scene.fog = new THREE.Fog("#cfdbe6", 120, 640);
-    const look = setupLook(renderer, scene, { shadow: coarse ? 2048 : 4096, composer: true, msaa: 4 });
+    const look = setupLook(renderer, scene, { shadow: coarse ? 2048 : 4096, composer: true, msaa: coarse ? 2 : 4 });
+    // gölge haritası her karede değil, yalnızca sahne / güneş değişince hesaplanır
+    renderer.shadowMap.autoUpdate = false;
+    renderer.shadowMap.needsUpdate = true;
     // iç mekân lambası (yalnızca odaya girince yanar)
     const lamp = new THREE.PointLight("#ffe4bd", 0, 14, 1.4);
     scene.add(lamp);
@@ -136,7 +139,8 @@ export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onE
     let moving = false;
     let refineT = 0;
     const render = () => {
-      const hq = hqRef.current && !(coarse && (moving || held.current.size > 0));
+      // hareket ederken hızlı çizim (ortam gölgesi yok), durunca yüksek kalite
+      const hq = hqRef.current && !(moving || held.current.size > 0);
       renderLook(look, camera, hq);
       updCompass();
       if (!hq && hqRef.current) {
@@ -302,7 +306,7 @@ export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onE
         pinch = d;
       }
       applyLook();
-      moving = coarse;
+      moving = true;
       render();
     };
     const onUp = (e: PointerEvent) => {
@@ -460,6 +464,7 @@ export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onE
     const a = api.current;
     if (!a) return;
     setSecPlane(a.secPlane, v3.sec, secPos, secFlip);
+    a.renderer.shadowMap.needsUpdate = true;
     a.render();
   }, [secPos, secFlip, v3.sec]);
 
@@ -647,6 +652,7 @@ function blocked(fl: FullData["floors"][number] | undefined, x: number, y: numbe
 
 function applySun(a: Api, f: FullData, inside = false) {
   applyLookSun(a.look, f.env.sun, a.bounds);
+  a.renderer.shadowMap.needsUpdate = true;
   if (a.root) setNight(a.root, inside ? 0 : a.look.night);
   a.lamp.intensity = inside ? 5 + 14 * a.look.night : 0;
   a.renderer.toneMappingExposure = inside ? 1.12 : 0.9;

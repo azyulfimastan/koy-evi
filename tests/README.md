@@ -27,6 +27,7 @@ Sonra `tests/e2e` klasöründen (görüntüler `tests/shots/` içine düşer):
 | `rehber_test.py` | adım adım yönlendirme |
 | `kesit_test.py` | yatay/dikey kesit, kata tepeden bakış, duvardan geçme |
 | `yedek_test.py` | şablon, yedek indir/yükle, sürüm geçmişi, çöp kutusu |
+| `akicilik_test.py` | telefon hızında kare süreleri (2D önizleme, kaydırma, 3D döndürme) |
 | `performans_test.py` | 3 katlı büyük evde 3D kurulum süresi |
 | `foto_test.py` | gerçekçi fotoğraf modu (küçük boyutta) |
 | `gorsel.py`, `liste_gorsel.py` | örnek evin ekran görüntüleri |

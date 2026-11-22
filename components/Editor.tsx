@@ -35,7 +35,20 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
   const [view, setView] = useState<View>({ s: 40, ox: 0, oy: 0 });
   const [tool, setTool] = useState<Tool>("plot");
   const [sel, setSel] = useState<Sel>(null);
-  const [hover, setHover] = useState<Pt | null>(null);
+  // imleç önizlemesi: React yeniden çizimi tetiklemeden, karede bir kez tuvale çizilir
+  const hoverRef = useRef<Pt | null>(null);
+  const drawRef = useRef<() => void>(() => {});
+  const rafDraw = useRef(0);
+  const setHover = useCallback((p: Pt | null) => {
+    const cur = hoverRef.current;
+    if (cur === p || (cur && p && cur.x === p.x && cur.y === p.y)) return;
+    hoverRef.current = p;
+    if (!rafDraw.current)
+      rafDraw.current = requestAnimationFrame(() => {
+        rafDraw.current = 0;
+        drawRef.current();
+      });
+  }, []);
   const [chain, setChain] = useState<Pt | null>(null);
   const [note, setNote] = useState("");
   const [pick, setPick] = useState<CatItem | null>(null);
@@ -382,9 +395,10 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
   // ---------- çizim (components/editor/drawPlan.ts) ----------
   const draw = useCallback(() => {
     if (!cv.current || !wrap.current) return;
-    drawPlan(cv.current, wrap.current, { data, full, fi, view, sel, hover, chain, tool, pick, envPick, regions, roomCanvases, joins, placeOn });
+    drawPlan(cv.current, wrap.current, { data, full, fi, view, sel, hover: hoverRef.current, chain, tool, pick, envPick, regions, roomCanvases, joins, placeOn });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, full, fi, view, sel, hover, chain, tool, pick, envPick, regions, roomCanvases, joins]);
+  }, [data, full, fi, view, sel, chain, tool, pick, envPick, regions, roomCanvases, joins]);
+  drawRef.current = draw;
 
   useEffect(() => {
     draw();
