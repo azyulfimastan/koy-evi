@@ -109,6 +109,19 @@ export function drawItem(
     g.lineWidth = 1 / s;
     g.strokeStyle = o.selected || o.ghost ? "#d9822b" : "#4a4638";
   };
+  // yumuşak gölge (RoomSketcher tarzı)
+  if (!o.ghost && it.shape !== "rug") {
+    g.save();
+    g.shadowColor = "rgba(40,30,20,0.32)";
+    g.shadowBlur = Math.max(3, Math.min(10, s * 0.09));
+    g.shadowOffsetX = Math.max(1, s * 0.02);
+    g.shadowOffsetY = Math.max(1, s * 0.025);
+    g.beginPath();
+    if (it.shape === "round") g.ellipse(0, 0, w / 2, d / 2, 0, 0, Math.PI * 2);
+    else g.rect(-w / 2, -d / 2, w, d);
+    g.fill();
+    g.restore();
+  }
   switch (it.shape) {
     case "round":
       ell(0, 0, w / 2, d / 2);
@@ -123,21 +136,41 @@ export function drawItem(
       g.setLineDash([]);
       break;
     case "bed": {
+      const base = g.fillStyle;
+      g.fillStyle = o.ghost ? base : "#f3efe7";
       rect(-w / 2, -d / 2, w, d);
       thin();
+      g.fillStyle = base;
+      rect(-w / 2 + 0.02, -d / 2 + d * 0.32, w - 0.04, d * 0.68 - 0.02);
+      g.fillStyle = o.ghost ? base : "rgba(255,255,255,0.35)";
+      rect(-w / 2 + 0.02, -d / 2 + d * 0.32, w - 0.04, d * 0.08);
       const n = w > 1.2 ? 2 : 1;
-      const pw = (w - 0.1 * (n + 1)) / n;
-      for (let i = 0; i < n; i++) rect(-w / 2 + 0.1 + i * (pw + 0.1), -d / 2 + 0.08, pw, Math.min(0.4, d * 0.2), false);
-      line(-w / 2, -d / 2 + d * 0.38, w / 2, -d / 2 + d * 0.38);
+      const pw = (w - 0.12 * (n + 1)) / n;
+      g.fillStyle = o.ghost ? base : "#ffffff";
+      for (let i = 0; i < n; i++) {
+        g.beginPath();
+        g.roundRect(-w / 2 + 0.12 + i * (pw + 0.12), -d / 2 + 0.08, pw, Math.min(0.36, d * 0.18), 0.06);
+        g.fill();
+        g.stroke();
+      }
+      g.lineWidth = 3 / s;
+      line(-w / 2, -d / 2 + 0.015, w / 2, -d / 2 + 0.015);
       break;
     }
     case "sofa": {
       rect(-w / 2, -d / 2, w, d);
       thin();
-      rect(-w / 2, -d / 2, w, d * 0.28, false);
       const arm = Math.min(0.18, w * 0.15);
-      rect(-w / 2, -d / 2 + d * 0.28, arm, d * 0.72, false);
-      rect(w / 2 - arm, -d / 2 + d * 0.28, arm, d * 0.72, false);
+      const back = d * 0.26;
+      const base = g.fillStyle;
+      if (!o.ghost) g.fillStyle = "rgba(0,0,0,0.12)";
+      rect(-w / 2, -d / 2, w, back);
+      rect(-w / 2, -d / 2 + back, arm, d - back);
+      rect(w / 2 - arm, -d / 2 + back, arm, d - back);
+      g.fillStyle = base;
+      const inner = w - 2 * arm;
+      const nC = Math.max(1, Math.round(inner / 0.7));
+      for (let i = 1; i < nC; i++) line(-w / 2 + arm + (i * inner) / nC, -d / 2 + back, -w / 2 + arm + (i * inner) / nC, d / 2);
       break;
     }
     case "chair":

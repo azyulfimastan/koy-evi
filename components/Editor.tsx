@@ -11,7 +11,8 @@ import type { Region } from "@/lib/rooms";
 import { VERSION } from "./App";
 import dynamic from "next/dynamic";
 import { totalHeight, type V3 } from "@/lib/scene3d";
-import { EXT_TEX, FLOOR_DEFAULT, FLOOR_TEX, INT_TEX, ROOF_TEX, SWATCHES } from "@/lib/textures";
+import { BASE_TEX, EXT_TEX, FLOOR_DEFAULT, FLOOR_TEX, INT_TEX, ROOF_TEX, SWATCHES } from "@/lib/textures";
+import { fillMaskWithPattern, floorColor, texPattern } from "@/lib/plan2d";
 import type { Finish, EnvKind, EnvObj } from "@/lib/types";
 import { ENV_KINDS, MONTHS, compassName, drawEnv, newEnv, sunPos } from "@/lib/env";
 import type { Pick3, Walk } from "./View3D";
@@ -143,7 +144,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
           img.data[i * 4] = R;
           img.data[i * 4 + 1] = G;
           img.data[i * 4 + 2] = B;
-          img.data[i * 4 + 3] = 150;
+          img.data[i * 4 + 3] = 255;
         }
       }
       g.putImageData(img, 0, 0);
@@ -160,6 +161,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
       .then((p) => {
         if (dead) return;
         const d = normalizeFull(p.data);
+        hasThumb.current = !!p.thumb;
         setName(p.name);
         setFull(d);
         setFi(0);
@@ -226,9 +228,34 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
     };
   }, [putNow]);
 
+  const hasThumb = useRef(false);
+  const [leaving, setLeaving] = useState(false);
   async function goBack() {
+    const changed = ver.current > 0 || !hasThumb.current;
+    setLeaving(true);
     if (dirty.current) await putNow();
+    const snap = full;
     onBack();
+    // evler listesinde görünecek küçük 3B resim (arka planda)
+    let skip = false;
+    try {
+      skip = localStorage.getItem("kte_nothumb") === "1"; // otomatik testlerde
+    } catch {
+      /* yok say */
+    }
+    if (!skip && changed && snap.floors.some((f) => f.walls.length)) {
+      setTimeout(async () => {
+        try {
+          const { render3d } = await import("@/lib/report");
+          const cv = render3d(snap, [0.9, 0.5, 1], 640, 400, false, 0.72, 1024);
+          const thumb = cv.toDataURL("image/jpeg", 0.78);
+          await fetch("/api/projects/" + id, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ thumb }) });
+          window.dispatchEvent(new CustomEvent("kte-thumb"));
+        } catch {
+          /* resim olmasa da sorun değil */
+        }
+      }, 50);
+    }
   }
 
   useEffect(() => {
@@ -435,7 +462,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
       g.beginPath();
       sp.forEach((p, i) => (i ? g.lineTo(p.x, p.y) : g.moveTo(p.x, p.y)));
       g.closePath();
-      g.fillStyle = "rgba(122,160,92,0.16)";
+      g.fillStyle = texPattern(g, "grass", "#a9c98a", s, ox, oy, 0.12) ?? "rgba(122,160,92,0.16)";
       g.fill();
     }
     if (pts.length >= 2 || (pts.length === 1 && hover)) {
@@ -460,8 +487,13 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
       const cvs = roomCanvases.get(r.id);
       const reg = regions.get(r.id);
       if (!cvs || !reg) continue;
-      g.imageSmoothingEnabled = false;
-      g.drawImage(cvs, reg.x0 * s + ox, reg.y0 * s + oy, reg.w * reg.cell * s, reg.h * reg.cell * s);
+      const rx = reg.x0 * s + ox;
+      const ry = reg.y0 * s + oy;
+      const rw = reg.w * reg.cell * s;
+      const rh = reg.h * reg.cell * s;
+      const tex = r.floor && r.floor !== "none" ? r.floor : "";
+      const pat = tex ? texPattern(g, tex, floorColor(r.floor, r.floorColor, r.color), s, ox, oy) : null;
+      fillMaskWithPattern(g, cvs, rx, ry, rw, rh, pat ?? r.color + "c0", dpr);
     }
 
     // alt katın hayaleti
@@ -522,10 +554,10 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
         const A = { x: w.a.x + u.x * s0, y: w.a.y + u.y * s0 };
         const B = { x: w.a.x + u.x * s1, y: w.a.y + u.y * s1 };
         poly(A, B, n, w.t / 2);
-        g.fillStyle = w.color;
+        g.fillStyle = w.color === WALL_COLOR || w.color === "#cccccc" ? "#3a352e" : w.color;
         g.fill();
-        g.strokeStyle = isSel ? "#d9822b" : "#3d382f";
-        g.lineWidth = isSel ? 2.5 : 1;
+        g.strokeStyle = isSel ? "#d9822b" : "#3a352e";
+        g.lineWidth = isSel ? 2.5 : 0.8;
         g.stroke();
       }
       // açıklıklar
@@ -545,6 +577,10 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
           g.stroke();
         }
         if (o.kind === "window") {
+          poly({ x: cC.x - (u.x * o.w) / 2, y: cC.y - (u.y * o.w) / 2 }, { x: cC.x + (u.x * o.w) / 2, y: cC.y + (u.y * o.w) / 2 }, n, w.t / 2);
+          g.fillStyle = "#f4f8fa";
+          g.fill();
+          g.strokeStyle = isOpSel ? "#d9822b" : "#3a352e";
           g.lineWidth = 1.2;
           for (const k of [-0.3, 0, 0.3]) {
             g.beginPath();
@@ -721,6 +757,15 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
       }
       if (sel?.k === "wall") continue; // seçili duvarın ölçü etiketiyle çakışmasın
       const q = S({ x: reg.cx, y: reg.cy });
+      const avail = Math.sqrt(reg.area) * s; // odanın ekrandaki yaklaşık genişliği
+      if (avail < 30 && !isSel) continue;
+      g.font = "600 12px system-ui";
+      if (avail < 95 && !isSel) {
+        let t = r.name;
+        while (t.length > 2 && g.measureText(t).width + 12 > avail) t = t.slice(0, -1);
+        label(g, t === r.name ? t : t.slice(0, -1) + "…", q.x, q.y, "#2a2a24", true);
+        continue;
+      }
       label(g, r.name, q.x, q.y - 9, isSel ? "#8a4b0b" : "#2a2a24", true);
       label(g, fmt(reg.area) + " m²", q.x, q.y + 9, isSel ? "#8a4b0b" : "#4a4638", false);
     }
@@ -1550,7 +1595,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
   return (
     <div className="editor">
       <div className="bar">
-        <button onClick={goBack}>← Evlerim</button>
+        <button onClick={goBack} disabled={leaving}>{leaving ? "Kaydediliyor…" : "← Evlerim"}</button>
         <input className="nm" value={name} onChange={(e) => setName(e.target.value)} aria-label="Ev adı" />
         <span className={"stat " + saved}>{stat}</span>
         <span className="ver">Köy Evi Tasarım {VERSION}</span>
@@ -1564,7 +1609,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
         ))}
         {!is3d && <button className="add" onClick={addFloor}>+ Kat</button>}
         <button className={"v3btn" + (is3d ? " on" : "")} onClick={() => { setIs3d((v) => !v); setSel(null); setChain(null); setWalk(null); setPick3(null); setPlaying(false); }}>
-          {is3d ? "◧ 2D plana dön" : "🧊 3D görünüm"}
+          {is3d ? <>◧ <span className="lg">2D plana dön</span><span className="sm">2D</span></> : <>🧊 <span className="lg">3D görünüm</span><span className="sm">3D</span></>}
         </button>
         <button className="v3btn rep" onClick={() => setShowRep(true)}>📋 Rapor</button>
         <button className="v3btn gd" onClick={() => setGuideOpen(true)} title="Adım adım yönlendirme">🧭</button>
@@ -1794,6 +1839,8 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
                 <MatRow label="Çatı" color={full.roof.color} tex={full.roof.tex} opts={ROOF_TEX}
                   onColor={(c) => apply({ ...dataRef.current, roof: { ...dataRef.current.roof, color: c } })}
                   onTex={(t) => apply({ ...dataRef.current, roof: { ...dataRef.current.roof, tex: t } })} />
+                <MatRow label="Subasman (taban taşı)" color={full.fin.baseColor ?? "#a39b8e"} tex={full.fin.baseTex ?? "stone"} opts={BASE_TEX}
+                  onColor={(c) => setFin({ baseColor: c })} onTex={(t) => setFin({ baseTex: t })} />
                 <MatRow label="Kapılar" color={full.fin.doorColor} onColor={(c) => setFin({ doorColor: c })} />
                 <MatRow label="Pencere çerçevesi" color={full.fin.frameColor} onColor={(c) => setFin({ frameColor: c })} />
                 <MatRow label="Bahçe zemini" color={full.fin.groundColor} onColor={(c) => setFin({ groundColor: c })} />

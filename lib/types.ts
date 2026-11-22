@@ -60,6 +60,8 @@ export type Finish = {
   doorColor: string;
   frameColor: string;
   groundColor: string;
+  baseColor?: string; // subasman (taban taşı)
+  baseTex?: string;
 };
 export const defaultFinish = (): Finish => ({ extColor: "#e9e1d3", extTex: "plain", intColor: "#f4f0e8", intTex: "plain", doorColor: "#8a5a36", frameColor: "#f7f7f4", groundColor: "#93b565" });
 export type FullData = { plot: Plot; snap: number; defT: number; roof: Roof; floors: Floor[]; custom: CatItem[]; fin: Finish; env: Env };
@@ -82,7 +84,7 @@ export type PlanData = {
   custom: CatItem[];
 };
 
-export type Project = { id: string; name: string; createdAt: number; updatedAt: number; data: FullData };
+export type Project = { id: string; name: string; createdAt: number; updatedAt: number; data: FullData; thumb?: string };
 
 export const uid = () => Math.random().toString(36).slice(2, 10);
 

@@ -23,6 +23,7 @@ export async function PUT(req: Request, { params }: Ctx) {
     ...cur,
     name: typeof body.name === "string" ? body.name.trim().slice(0, 80) || cur.name : cur.name,
     data: body.data ?? cur.data,
+    thumb: typeof body.thumb === "string" && body.thumb.startsWith("data:image/") && body.thumb.length < 300000 ? body.thumb : cur.thumb,
     updatedAt: Date.now(),
   };
   await saveProject(next);

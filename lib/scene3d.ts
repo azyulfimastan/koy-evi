@@ -1,8 +1,8 @@
 import * as THREE from "three";
-import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
-import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
+import { mergeGeometries, mergeVertices } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import type { EnvObj, FullData, Finish, Floor, Item, Opening, Stair } from "./types";
-import { FLOOR_DEFAULT, TEX_SIZE, getTex } from "./textures";
+import { FLOOR_DEFAULT, ROUGH, TEX_SIZE, getNormal, getTex } from "./textures";
+import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import { inRegion, rasterize, regionAt, wallGeom } from "./rooms";
 import { roofInfo } from "./roof";
 import { stairBox, stairLocal, stairSteps, TREAD } from "./stairs";
@@ -38,24 +38,62 @@ type Mats = ReturnType<typeof makeMats>;
 function makeMats(clip: THREE.Plane[], fin: Finish) {
   const std = (color: string, extra: Partial<THREE.MeshStandardMaterialParameters> = {}) =>
     new THREE.MeshStandardMaterial({ color, roughness: 0.85, metalness: 0, clippingPlanes: clip, ...extra });
+  const side = clip.length ? THREE.DoubleSide : THREE.FrontSide;
+  const ns = (k: string, v = 1) => ({ normalMap: getNormal(k), normalScale: new THREE.Vector2(v, v) });
+  const baseTex = fin.baseTex ?? "stone";
   return {
-    wallExt: std("#ffffff", { vertexColors: true, map: getTex(fin.extTex), side: clip.length ? THREE.DoubleSide : THREE.FrontSide }),
-    wallInt: std("#ffffff", { vertexColors: true, map: getTex(fin.intTex), side: clip.length ? THREE.DoubleSide : THREE.FrontSide }),
-    wallSide: std("#ffffff", { vertexColors: true, side: clip.length ? THREE.DoubleSide : THREE.FrontSide }),
-    frame: std(fin.frameColor),
-    slab: std("#d8d0c2"),
+    wallExt: std("#ffffff", { vertexColors: true, map: getTex(fin.extTex), ...ns(fin.extTex), roughness: ROUGH[fin.extTex] ?? 0.92, side }),
+    wallInt: std("#ffffff", { vertexColors: true, map: getTex(fin.intTex), ...ns(fin.intTex, 0.6), roughness: ROUGH[fin.intTex] ?? 0.92, side }),
+    wallSide: std("#ffffff", { vertexColors: true, side }),
+    frame: std(fin.frameColor, { roughness: 0.45 }),
+    slab: std("#ebe6dd", { roughness: 0.95 }),
     floorTop: std("#cdb894"),
     cap: new THREE.MeshStandardMaterial({ color: CUT_CAP, roughness: 1 }),
-    glass: new THREE.MeshStandardMaterial({ color: "#9cc7e0", roughness: 0.1, transparent: true, opacity: 0.35, depthWrite: false, side: THREE.DoubleSide, clippingPlanes: clip }),
-    door: std(fin.doorColor),
+    glass: new THREE.MeshStandardMaterial({ color: "#a9c6d6", roughness: 0.04, metalness: 0.15, transparent: true, opacity: 0.32, depthWrite: false, side: THREE.DoubleSide, clippingPlanes: clip, envMapIntensity: 2.2 }),
+    door: std(fin.doorColor, { roughness: 0.55, map: getTex("wood"), ...ns("wood", 0.5) }),
+    doorPanel: std("#" + new THREE.Color(fin.doorColor).multiplyScalar(0.82).getHexString(), { roughness: 0.55, map: getTex("wood") }),
     stair: std("#c9b79c"),
-    white: std("#f7f7f4"),
+    white: std("#f7f7f4", { roughness: 0.35 }),
     dark: std("#3a3a3a"),
-    metal: std("#b8bcc0", { metalness: 0.3, roughness: 0.4 }),
-    infill: new THREE.MeshStandardMaterial({ color: fin.extColor, roughness: 0.9, side: THREE.DoubleSide }),
+    metal: std("#c4c8cc", { metalness: 0.85, roughness: 0.3 }),
+    sill: std("#ece8e0", { roughness: 0.4, map: getTex("marble"), ...ns("marble", 0.4) }),
+    plinth: std(fin.baseColor ?? "#a39b8e", { roughness: ROUGH[baseTex] ?? 0.9, map: getTex(baseTex), ...ns(baseTex, 1) }),
+    band: std("#f1ede5", { roughness: 0.7 }),
+    pave: std("#cbc5b8", { roughness: 0.85, map: getTex("fayans"), ...ns("fayans", 1.2) }),
+    gutter: std("#8d9196", { metalness: 0.6, roughness: 0.45 }),
+    brick: std("#b8664a", { map: getTex("brick"), ...ns("brick", 1) }),
+    infill: new THREE.MeshStandardMaterial({ color: fin.extColor, roughness: 0.9, side: THREE.DoubleSide, map: getTex(fin.extTex), ...ns(fin.extTex) }),
     clip,
     fin,
   };
+}
+
+/** Yerel (duvar) koordinatında kutu → dünya; üst/alt yüzlere dünya dokusu */
+function lbox(M: THREE.Matrix4, x0: number, x1: number, y0: number, y1: number, z0: number, z1: number, uvSize = 0) {
+  const b = new THREE.BoxGeometry(Math.max(0.002, Math.abs(x1 - x0)), Math.max(0.002, Math.abs(y1 - y0)), Math.max(0.002, Math.abs(z1 - z0)));
+  b.translate((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
+  b.applyMatrix4(M);
+  if (uvSize > 0) {
+    const P = b.attributes.position;
+    const Nn = b.attributes.normal;
+    const uv = b.attributes.uv;
+    for (let i = 0; i < P.count; i++) {
+      const [u, v] = worldUV(P.getX(i), P.getY(i), P.getZ(i), Nn.getX(i), Nn.getY(i), Nn.getZ(i), uvSize);
+      uv.setXY(i, u, v);
+    }
+  }
+  return b;
+}
+
+/** İki nokta arasında silindir (boru) */
+function pipe(a: THREE.Vector3, b: THREE.Vector3, r: number, seg = 10) {
+  const L = a.distanceTo(b);
+  const c = new THREE.CylinderGeometry(r, r, L, seg);
+  c.translate(0, L / 2, 0);
+  const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), b.clone().sub(a).normalize());
+  c.applyQuaternion(q);
+  c.translate(a.x, a.y, a.z);
+  return c;
 }
 
 /* ---------------- açıklık şekli ---------------- */
@@ -188,7 +226,7 @@ function wallExt(walls: Floor["walls"]) {
   return m;
 }
 
-function buildWalls(fl: Floor, base: number, m: Mats, cut: boolean, g: THREE.Group) {
+function buildWalls(fl: Floor, base: number, m: Mats, cut: boolean, g: THREE.Group, level = 0) {
   const exts = wallExt(fl.walls);
   const H = fl.height;
   const isOut = outsideFn(fl);
@@ -202,7 +240,15 @@ function buildWalls(fl: Floor, base: number, m: Mats, cut: boolean, g: THREE.Gro
   const doorGeoms: THREE.BufferGeometry[] = [];
   const capGeoms: THREE.BufferGeometry[] = [];
   const frameGeoms: THREE.BufferGeometry[] = [];
+  const sillGeoms: THREE.BufferGeometry[] = [];
+  const plinthGeoms: THREE.BufferGeometry[] = [];
+  const bandGeoms: THREE.BufferGeometry[] = [];
+  const paveGeoms: THREE.BufferGeometry[] = [];
+  const panelGeoms: THREE.BufferGeometry[] = [];
+  const metalGeoms: THREE.BufferGeometry[] = [];
+  let wi = 0;
   for (const w of fl.walls) {
+    wi++;
     const { L, u, n } = wallGeom(w, undefined);
     const [ea, eb] = exts.get(w.id) ?? [0, 0];
     if (L < 0.01 || L + ea + eb < 0.01) continue;
@@ -241,16 +287,18 @@ function buildWalls(fl: Floor, base: number, m: Mats, cut: boolean, g: THREE.Gro
     geo.translate(0, 0, -w.t / 2);
     const M = new THREE.Matrix4().makeBasis(V(u.x, 0, u.y), V(0, 1, 0), V(n.x, 0, n.y)).setPosition(w.a.x, base, w.a.y);
     geo.applyMatrix4(M);
+    const mx = (w.a.x + w.b.x) / 2;
+    const my = (w.a.y + w.b.y) / 2;
+    const dd = w.t / 2 + 0.25;
+    const outN = isOut(mx + n.x * dd, my + n.y * dd);
+    const outM = isOut(mx - n.x * dd, my - n.y * dd);
+    const zOut = outN && !outM ? 1 : outM && !outN ? -1 : 0; // dış yüz yerel +z mi -z mi
+    const T2 = w.t / 2;
     // yüzleri dış / iç / kenar olarak ayır, renk ve doku koordinatı ver
     {
       const g2 = ni(geo);
       const P = g2.attributes.position;
       const Nn = g2.attributes.normal;
-      const mx = (w.a.x + w.b.x) / 2;
-      const my = (w.a.y + w.b.y) / 2;
-      const d = w.t / 2 + 0.25;
-      const outN = isOut(mx + n.x * d, my + n.y * d);
-      const outM = isOut(mx - n.x * d, my - n.y * d);
       const cExt = new THREE.Color(w.ext ?? fin.extColor);
       const cInt = new THREE.Color(w.int ?? fin.intColor);
       for (let i = 0; i + 2 < P.count; i += 3) {
@@ -284,29 +332,101 @@ function buildWalls(fl: Floor, base: number, m: Mats, cut: boolean, g: THREE.Gro
 
     for (const q of ops) {
       if (q.o.kind === "window") {
+        // pencere dış yüze yakın oturur: içeride derin bir pervaz boşluğu kalır
+        const rz = zOut ? zOut * (T2 - 0.07) : 0;
         const gg = new THREE.ShapeGeometry(openingShape(q.a, q.b, q.bottom, q.top, q.o.shape), 16);
+        gg.translate(0, 0, rz);
         gg.applyMatrix4(M);
         glassGeoms.push(gg);
-        const fw = Math.min(0.06, (q.b - q.a) / 6, (q.top - q.bottom) / 6);
+        const fw = Math.min(0.07, (q.b - q.a) / 6, (q.top - q.bottom) / 6);
         const fr = openingShape(q.a, q.b, q.bottom, q.top, q.o.shape);
         const inner = new THREE.Path();
         openingPath(inner, q.a + fw, q.b - fw, q.bottom + fw, q.top - fw, q.o.shape, false);
         fr.holes.push(inner);
-        const fg = new THREE.ExtrudeGeometry(fr, { depth: 0.08, bevelEnabled: false, curveSegments: 16 });
-        fg.translate(0, 0, -0.04);
+        const fg = new THREE.ExtrudeGeometry(fr, { depth: 0.09, bevelEnabled: false, curveSegments: 16 });
+        fg.translate(0, 0, -0.045 + rz);
         fg.applyMatrix4(M);
         frameGeoms.push(ni(fg));
-        if (q.o.shape === "rect" && q.b - q.a > 0.7) {
-          const mb = new THREE.BoxGeometry(fw * 0.8, q.top - q.bottom - 2 * fw, 0.06);
-          mb.translate((q.a + q.b) / 2, (q.top + q.bottom) / 2, 0);
-          mb.applyMatrix4(M);
-          frameGeoms.push(ni(mb));
+        if (q.o.shape === "rect") {
+          const wd = q.b - q.a;
+          const ht = q.top - q.bottom;
+          const transom = ht > 1.15 ? q.top - Math.min(0.42, ht * 0.3) : 0;
+          if (wd > 0.7) frameGeoms.push(lbox(M, (q.a + q.b) / 2 - fw * 0.45, (q.a + q.b) / 2 + fw * 0.45, q.bottom + fw, transom || q.top - fw, rz - 0.035, rz + 0.035));
+          if (transom) frameGeoms.push(lbox(M, q.a + fw, q.b - fw, transom - fw * 0.45, transom + fw * 0.45, rz - 0.035, rz + 0.035));
+          // kanat çerçeveleri (ince iç kasa)
+          const sash = 0.035;
+          const cols = wd > 0.7 ? [[q.a + fw, (q.a + q.b) / 2 - fw * 0.45], [(q.a + q.b) / 2 + fw * 0.45, q.b - fw]] : [[q.a + fw, q.b - fw]];
+          for (const [x0, x1] of cols) {
+            const y0 = q.bottom + fw;
+            const y1 = (transom || q.top) - (transom ? fw * 0.45 : fw);
+            for (const [a0, a1, b0, b1] of [[x0, x1, y0, y0 + sash], [x0, x1, y1 - sash, y1], [x0, x0 + sash, y0, y1], [x1 - sash, x1, y0, y1]]) frameGeoms.push(lbox(M, a0, a1, b0, b1, rz - 0.025, rz + 0.025));
+          }
+          if (zOut) {
+            // dış denizlik (öne taşar) ve iç denizlik
+            sillGeoms.push(lbox(M, q.a - 0.06, q.b + 0.06, q.bottom - 0.05, q.bottom, rz, zOut * (T2 + 0.07)));
+            if (q.bottom > 0.3) sillGeoms.push(lbox(M, q.a - 0.04, q.b + 0.04, q.bottom - 0.03, q.bottom + 0.004, rz, -zOut * (T2 + 0.035)));
+          }
         }
       } else {
-        const dg = new THREE.ExtrudeGeometry(openingShape(q.a + 0.01, q.b - 0.01, q.bottom, q.top - 0.01, q.o.shape), { depth: 0.04, bevelEnabled: false, curveSegments: 16 });
-        dg.translate(0, 0, (q.o.flip ? -1 : 1) * (w.t / 2 - 0.06) - 0.02);
+        const zc = (q.o.flip ? -1 : 1) * (T2 - 0.06);
+        const dg = new THREE.ExtrudeGeometry(openingShape(q.a + 0.01, q.b - 0.01, q.bottom, q.top - 0.01, q.o.shape), { depth: 0.045, bevelEnabled: false, curveSegments: 16 });
+        dg.translate(0, 0, zc - 0.0225);
         dg.applyMatrix4(M);
         doorGeoms.push(ni(dg));
+        if (q.o.shape === "rect" && q.top - q.bottom > 1.7) {
+          // kapı kanadı panelleri ve kol
+          const px0 = q.a + 0.13;
+          const px1 = q.b - 0.13;
+          const hgt = q.top - q.bottom;
+          const panels = q.b - q.a > 1.15 ? [[q.bottom + 0.15, q.bottom + hgt * 0.42], [q.bottom + hgt * 0.5, q.top - 0.15]] : [[q.bottom + 0.15, q.bottom + hgt * 0.42], [q.bottom + hgt * 0.5, q.top - 0.15]];
+          for (const [y0, y1] of panels)
+            for (const sz of [1, -1]) panelGeoms.push(lbox(M, px0, px1, y0, y1, zc + sz * 0.0225, zc + sz * 0.034));
+          const hx = q.o.hinge ? q.a + 0.09 : q.b - 0.09;
+          const dir = q.o.hinge ? 1 : -1;
+          for (const sz of [1, -1]) {
+            metalGeoms.push(lbox(M, hx - 0.025, hx + 0.025, q.bottom + 0.96, q.bottom + 1.1, zc + sz * 0.0225, zc + sz * 0.03));
+            metalGeoms.push(lbox(M, Math.min(hx, hx + dir * 0.13), Math.max(hx, hx + dir * 0.13), q.bottom + 1.03, q.bottom + 1.055, zc + sz * 0.05, zc + sz * 0.075));
+            metalGeoms.push(lbox(M, hx - 0.012, hx + 0.012, q.bottom + 1.03, q.bottom + 1.055, zc + sz * 0.03, zc + sz * 0.06));
+          }
+          // pervaz (iki yüzde) ve kasa
+          if (q.bottom < 0.005) {
+            const pw = 0.075;
+            for (const sz of [1, -1]) {
+              const z0 = sz * T2;
+              const z1 = sz * (T2 + 0.018);
+              panelGeoms.push(lbox(M, q.a - pw, q.a, 0, q.top + pw, z0, z1));
+              panelGeoms.push(lbox(M, q.b, q.b + pw, 0, q.top + pw, z0, z1));
+              panelGeoms.push(lbox(M, q.a - pw, q.b + pw, q.top, q.top + pw, z0, z1));
+            }
+            panelGeoms.push(lbox(M, q.a, q.a + 0.02, 0, q.top, -T2, T2));
+            panelGeoms.push(lbox(M, q.b - 0.02, q.b, 0, q.top, -T2, T2));
+            panelGeoms.push(lbox(M, q.a, q.b, q.top - 0.02, q.top, -T2, T2));
+          }
+        }
+      }
+    }
+    // dış cephe detayları
+    if (zOut && !cut) {
+      const xs = -(T2 + 0.035);
+      const xe = L + T2 + 0.035;
+      const gaps = floorOps.map((q) => [q.a - (q.o.shape === "rect" ? 0.08 : 0.01), q.b + (q.o.shape === "rect" ? 0.08 : 0.01)] as [number, number]).sort((p, q) => p[0] - q[0]);
+      const spans: [number, number][] = [];
+      let x0 = xs;
+      for (const [ga, gb] of gaps) {
+        if (ga > x0) spans.push([x0, ga]);
+        x0 = Math.max(x0, gb);
+      }
+      if (x0 < xe) spans.push([x0, xe]);
+      if (level === 0) {
+        // subasman (taş taban) ve çevre kaldırımı
+        for (const [a0, a1] of spans) plinthGeoms.push(lbox(M, a0, a1, 0, 0.5, zOut * (T2 - 0.01), zOut * (T2 + 0.035), 1.2));
+        const hz = 0.022 + (wi % 5) * 0.0012;
+        paveGeoms.push(lbox(M, -(T2 + 0.9), L + T2 + 0.9, -0.03, hz, zOut * (T2 - 0.02), zOut * (T2 + 0.9), 0.6));
+        // giriş kapısından bahçeye taş yol
+        for (const q of floorOps) paveGeoms.push(lbox(M, q.a - 0.2, q.b + 0.2, -0.03, hz + 0.002, zOut * (T2 + 0.5), zOut * (T2 + 3.6), 0.6));
+      } else {
+        // kat silmesi (iki kat arasındaki kuşak)
+        for (const [a0, a1] of spans) bandGeoms.push(lbox(M, a0, a1, -0.22, 0.06, zOut * (T2 - 0.01), zOut * (T2 + 0.04)));
       }
     }
     if (cut) {
@@ -317,14 +437,15 @@ function buildWalls(fl: Floor, base: number, m: Mats, cut: boolean, g: THREE.Gro
     }
   }
   const add = (geos: THREE.BufferGeometry[], mat: THREE.Material, shadow = true) => {
-    if (!geos.length) return;
+    if (!geos.length) return null;
     const merged = mergeGeometries(geos.map(ni));
     geos.forEach((q) => q.dispose());
-    if (!merged) return;
+    if (!merged) return null;
     const mesh = new THREE.Mesh(merged, mat);
     mesh.castShadow = shadow;
     mesh.receiveShadow = shadow;
     g.add(mesh);
+    return mesh;
   };
   for (const [b, mat, face] of [[bExt, m.wallExt, "ext"], [bInt, m.wallInt, "int"], [bSide, m.wallSide, "side"]] as [Bucket, THREE.Material, string][]) {
     const bg = bucketGeo(b);
@@ -335,10 +456,17 @@ function buildWalls(fl: Floor, base: number, m: Mats, cut: boolean, g: THREE.Gro
     mesh.receiveShadow = !cut;
     g.add(mesh);
   }
-  add(glassGeoms, m.glass, false);
+  const gm = add(glassGeoms, m.glass, false);
+  if (gm) gm.userData.glass = true;
   add(doorGeoms, m.door, !cut);
   add(capGeoms, m.cap, false);
   add(frameGeoms, m.frame, !cut);
+  add(sillGeoms, m.sill, !cut);
+  add(plinthGeoms, m.plinth, true);
+  add(bandGeoms, m.band, true);
+  add(paveGeoms, m.pave, true);
+  add(panelGeoms, m.doorPanel, !cut);
+  add(metalGeoms, m.metal, false);
 }
 
 /* ---------------- döşeme ---------------- */
@@ -493,7 +621,7 @@ function buildRoomFloors(fl: Floor, below: Floor | null, base: number, clip: THR
     const merged = mergeGeometries(geos);
     geos.forEach((q) => q.dispose());
     if (!merged) return;
-    const mt = new THREE.MeshStandardMaterial({ color: "#ffffff", vertexColors: true, map: getTex(key), roughness: key === "fayans" ? 0.35 : 0.85, clippingPlanes: clip, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    const mt = new THREE.MeshStandardMaterial({ color: "#ffffff", vertexColors: true, map: getTex(key), normalMap: getNormal(key), roughness: ROUGH[key] ?? 0.85, clippingPlanes: clip, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
     const mesh = new THREE.Mesh(merged, mt);
     mesh.position.y = base + 0.004;
     mesh.userData = { pick: "room", ids: idsByTex.get(key) };
@@ -582,126 +710,340 @@ function buildItem(it: Item, base: number, m: Mats, g: THREE.Group) {
   const ig = new THREE.Group();
   const { w, d, h } = it;
   const main = colorMat(it.color, m.clip);
+  const shade = (c: string, k: number) => colorMat("#" + new THREE.Color(c).multiplyScalar(k).getHexString(), m.clip);
+  const wood = colorMat("#8a6a4a", m.clip);
   const add = (geo: THREE.BufferGeometry, mat: THREE.Material) => {
     const mesh = new THREE.Mesh(geo, mat);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     ig.add(mesh);
+    return mesh;
   };
-  // yerel kutu: x [-w/2,w/2], plan-y (z) [-d/2,d/2], arka taraf = -d/2
-  const box = (x0: number, x1: number, z0: number, z1: number, y0: number, y1: number, mat: THREE.Material = main) => {
-    const b = new THREE.BoxGeometry(Math.max(0.005, x1 - x0), Math.max(0.005, y1 - y0), Math.max(0.005, z1 - z0));
+  // yerel kutu: x [-w/2,w/2], plan-y (z) [-d/2,d/2], arka taraf = -d/2; r: kenar yuvarlatma
+  const box = (x0: number, x1: number, z0: number, z1: number, y0: number, y1: number, mat: THREE.Material = main, r = 0.012) => {
+    const sx = Math.max(0.004, x1 - x0);
+    const sy = Math.max(0.004, y1 - y0);
+    const sz = Math.max(0.004, z1 - z0);
+    const rr = Math.min(r, sx / 2 - 0.001, sy / 2 - 0.001, sz / 2 - 0.001);
+    const b = rr > 0.003 ? new RoundedBoxGeometry(sx, sy, sz, 2, rr) : new THREE.BoxGeometry(sx, sy, sz);
     b.translate((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
-    add(b, mat);
+    return add(b, mat);
+  };
+  const cyl = (rx: number, y0: number, y1: number, mat: THREE.Material, x = 0, z = 0, rz = rx, seg = 28, rTop = rx) => {
+    const c = new THREE.CylinderGeometry(rTop, rx, Math.max(0.002, y1 - y0), seg);
+    c.scale(1, 1, rz / rx);
+    c.translate(x, (y0 + y1) / 2, z);
+    return add(c, mat);
+  };
+  const legs = (x: number, z: number, y1: number, r: number, mat: THREE.Material) => {
+    for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) cyl(r, 0, y1, mat, sx * x, sz * z, r, 10);
+  };
+  const handle = (x: number, y: number, z: number, vertical: boolean, len = 0.12) => {
+    if (vertical) box(x - 0.008, x + 0.008, z, z + 0.025, y - len / 2, y + len / 2, m.metal, 0.006);
+    else box(x - len / 2, x + len / 2, z, z + 0.025, y - 0.008, y + 0.008, m.metal, 0.006);
+  };
+  /** önden kapaklı dolap gövdesi */
+  const cabinet = (y0: number, y1: number, doors: number, body: THREE.Material, front: THREE.Material, drawers = false) => {
+    box(-W2, W2, -D2, D2 - 0.02, y0, y1, body, 0.01);
+    const gap = 0.006;
+    const dw = (w - gap * (doors + 1)) / doors;
+    for (let i = 0; i < doors; i++) {
+      const x0 = -W2 + gap + i * (dw + gap);
+      box(x0, x0 + dw, D2 - 0.02, D2, y0 + gap, y1 - gap, front, 0.006);
+      if (drawers) handle(x0 + dw / 2, y1 - 0.06, D2, false, Math.min(0.16, dw * 0.5));
+      else handle(i % 2 === 0 && doors > 1 ? x0 + dw - 0.05 : x0 + 0.05, y1 - Math.min(0.12, (y1 - y0) * 0.25), D2, true, Math.min(0.14, (y1 - y0) * 0.3));
+    }
   };
   const W2 = w / 2;
   const D2 = d / 2;
-  const isTable = /masa|sehpa|ada/i.test(it.name) || it.key.startsWith("table") || it.key === "desk" || it.key.startsWith("coffee");
+  const isTable = /masa|sehpa|ada/i.test(it.name) || it.key.startsWith("table") || it.key === "desk" || it.key === "kdesk" || it.key.startsWith("coffee");
+  const fabric = (c: string) => colorMat(c, m.clip);
   switch (it.shape) {
     case "round": {
-      const cyl = (rTop: number, y0: number, y1: number, mat: THREE.Material) => {
-        const c = new THREE.CylinderGeometry(rTop, rTop, y1 - y0, 28);
-        c.scale(1, 1, d / w);
-        c.translate(0, (y0 + y1) / 2, 0);
-        add(c, mat);
-      };
       if (it.key === "ochair") {
-        cyl(W2 * 0.85, 0.42, 0.5, main);
-        box(-W2 * 0.7, W2 * 0.7, -D2 * 0.85, -D2 * 0.7, 0.5, h, main);
-        cyl(0.03, 0.05, 0.42, m.metal);
-        cyl(W2 * 0.8, 0, 0.05, m.dark);
+        cyl(W2 * 0.85, 0.42, 0.5, main, 0, 0, D2 * 0.85);
+        box(-W2 * 0.7, W2 * 0.7, -D2 * 0.85, -D2 * 0.68, 0.52, h, main, 0.04);
+        cyl(0.03, 0.08, 0.42, m.metal);
+        for (let i = 0; i < 5; i++) {
+          const a = (i / 5) * Math.PI * 2;
+          box(Math.cos(a) * W2 * 0.4 - 0.02, Math.cos(a) * W2 * 0.4 + 0.02, Math.sin(a) * W2 * 0.4 - 0.02, Math.sin(a) * W2 * 0.4 + 0.02, 0.02, 0.07, m.dark, 0.01);
+        }
+        cyl(W2 * 0.75, 0.05, 0.09, m.dark, 0, 0, D2 * 0.75, 5);
+      } else if (it.key === "plant") {
+        cyl(W2 * 0.75, 0, h * 0.32, colorMat("#b5653f", m.clip), 0, 0, D2 * 0.75, 20, W2 * 0.95);
+        cyl(W2 * 0.85, h * 0.3, h * 0.33, colorMat("#3b2a1d", m.clip), 0, 0, D2 * 0.85, 20);
+        const leaf = colorMat(it.color, m.clip);
+        for (let i = 0; i < 7; i++) {
+          const a = (i / 7) * Math.PI * 2;
+          const s = new THREE.SphereGeometry(1, 14, 10);
+          s.scale(W2 * 0.6, h * 0.22, D2 * 0.6);
+          s.translate(Math.cos(a) * W2 * 0.45, h * (0.5 + (i % 3) * 0.12), Math.sin(a) * D2 * 0.45);
+          add(s, leaf);
+        }
+        const s = new THREE.SphereGeometry(1, 14, 10);
+        s.scale(W2 * 0.7, h * 0.25, D2 * 0.7);
+        s.translate(0, h * 0.78, 0);
+        add(s, leaf);
+      } else if (it.key === "stool") {
+        cyl(W2, h - 0.05, h, main, 0, 0, D2);
+        cyl(0.025, 0.04, h - 0.05, m.metal);
+        cyl(W2 * 0.8, 0, 0.03, m.metal, 0, 0, D2 * 0.8);
+        cyl(W2 * 0.75, 0.25, 0.27, m.metal, 0, 0, D2 * 0.75, 20);
+      } else if (it.key === "pouf" || it.key === "bin") {
+        cyl(W2, 0, h, main, 0, 0, D2, 28, W2 * 0.96);
+        cyl(W2 * 0.96, h - 0.01, h + 0.01, shade(it.color, 0.9), 0, 0, D2 * 0.96);
       } else if (isTable || it.key === "tableR") {
-        cyl(W2, h - 0.04, h, main);
-        cyl(0.06, 0, h - 0.04, main);
-        cyl(Math.min(W2, 0.3), 0, 0.03, main);
-      } else cyl(W2, 0, h, main);
+        cyl(W2, h - 0.035, h, main, 0, 0, D2, 40);
+        cyl(0.05, 0.03, h - 0.035, main);
+        cyl(Math.min(W2, 0.28), 0, 0.03, main, 0, 0, Math.min(D2, 0.28));
+      } else cyl(W2, 0, h, main, 0, 0, D2);
       break;
     }
-    case "rug":
-      box(-W2, W2, -D2, D2, 0, Math.max(0.01, h), main);
+    case "rug": {
+      box(-W2, W2, -D2, D2, 0, Math.max(0.012, h), main, 0.006);
+      box(-W2 + 0.12, W2 - 0.12, -D2 + 0.12, D2 - 0.12, 0.002, Math.max(0.012, h) + 0.002, shade(it.color, 0.8), 0.004);
+      box(-W2 + 0.2, W2 - 0.2, -D2 + 0.2, D2 - 0.2, 0.004, Math.max(0.012, h) + 0.003, main, 0.004);
       break;
+    }
     case "bed": {
       const bunk = h > 1.2;
       const levels = bunk ? [0.25, 1.25] : [0];
+      const frame = colorMat("#8b6b4c", m.clip);
       for (const y of levels) {
-        box(-W2, W2, -D2, D2, y, y + 0.3, colorMat("#9a7b5a", m.clip));
-        box(-W2 + 0.03, W2 - 0.03, -D2 + 0.03, D2 - 0.03, y + 0.3, y + 0.48, m.white);
-        box(-W2 + 0.02, W2 - 0.02, -D2 + d * 0.32, D2 - 0.01, y + 0.48, y + 0.53, main);
+        box(-W2, W2, -D2, D2, y + 0.1, y + 0.3, frame, 0.02);
+        box(-W2 + 0.03, W2 - 0.03, -D2 + 0.04, D2 - 0.03, y + 0.3, y + 0.5, m.white, 0.05);
+        // yorgan: yanlardan sarkar
+        box(-W2 - 0.005, W2 + 0.005, -D2 + d * 0.3, D2 + 0.005, y + 0.34, y + 0.535, main, 0.06);
+        box(-W2 + 0.02, W2 - 0.02, -D2 + d * 0.3, -D2 + d * 0.38, y + 0.5, y + 0.56, shade(it.color, 1.12), 0.04);
         const n = w > 1.2 ? 2 : 1;
-        const pw = (w - 0.1 * (n + 1)) / n;
-        for (let i = 0; i < n; i++) box(-W2 + 0.1 + i * (pw + 0.1), -W2 + 0.1 + i * (pw + 0.1) + pw, -D2 + 0.08, -D2 + 0.45, y + 0.48, y + 0.6, m.white);
+        const pw = (w - 0.12 * (n + 1)) / n;
+        for (let i = 0; i < n; i++) box(-W2 + 0.12 + i * (pw + 0.12), -W2 + 0.12 + i * (pw + 0.12) + pw, -D2 + 0.08, -D2 + 0.48, y + 0.5, y + 0.64, m.white, 0.06);
       }
-      box(-W2, W2, -D2 - 0.06, -D2, 0, bunk ? h : 1.0, colorMat("#8a6a4a", m.clip));
-      if (bunk) for (const sx of [-1, 1]) box(sx * W2 - 0.03, sx * W2 + 0.03, D2 - 0.06, D2, 0, h, colorMat("#8a6a4a", m.clip));
+      if (!bunk) legs(W2 - 0.06, D2 - 0.06, 0.1, 0.025, frame);
+      box(-W2 - 0.02, W2 + 0.02, -D2 - 0.07, -D2, 0, bunk ? h : 1.05, frame, 0.03);
+      if (!bunk) box(-W2 + 0.05, W2 - 0.05, -D2 - 0.0, -D2 + 0.04, 0.55, 0.98, shade(it.color, 0.9), 0.03);
+      else for (const sx of [-1, 1]) box(sx * W2 - 0.03, sx * W2 + 0.03, D2 - 0.06, D2, 0, h, frame);
       break;
     }
     case "sofa": {
-      const arm = Math.min(0.18, w * 0.15);
-      box(-W2, W2, -D2, D2, 0.05, 0.42, main);
-      box(-W2, W2, -D2, -D2 + d * 0.28, 0.42, h, main);
-      box(-W2, -W2 + arm, -D2, D2, 0.42, Math.min(h, 0.62), main);
-      box(W2 - arm, W2, -D2, D2, 0.42, Math.min(h, 0.62), main);
-      box(-W2 + arm, W2 - arm, -D2 + d * 0.28, D2 - 0.02, 0.42, 0.5, colorMat("#f1e6d2", m.clip));
+      const arm = Math.min(0.2, w * 0.16);
+      const seatH = 0.44;
+      const back = d * 0.26;
+      const fab = main;
+      legs(W2 - 0.08, D2 - 0.08, 0.08, 0.02, colorMat("#3b2f25", m.clip));
+      box(-W2, W2, -D2, D2, 0.08, 0.3, fab, 0.03);
+      box(-W2, -W2 + arm, -D2, D2, 0.08, Math.min(h, 0.64), fab, 0.07);
+      box(W2 - arm, W2, -D2, D2, 0.08, Math.min(h, 0.64), fab, 0.07);
+      box(-W2 + arm - 0.02, W2 - arm + 0.02, -D2, -D2 + back * 0.6, 0.08, h - 0.02, fab, 0.06);
+      const inner = w - 2 * arm;
+      const n = Math.max(1, Math.round(inner / 0.7));
+      const cw = inner / n;
+      const cush = shade(it.color, 1.08);
+      for (let i = 0; i < n; i++) {
+        const x0 = -W2 + arm + i * cw + 0.008;
+        box(x0, x0 + cw - 0.016, -D2 + back * 0.55, D2 - 0.03, 0.3, seatH, cush, 0.06);
+        box(x0, x0 + cw - 0.016, -D2 + back * 0.5, -D2 + back + 0.08, seatH - 0.02, h - 0.06, cush, 0.08);
+      }
+      if (it.key === "sofaL") box(W2 - arm - 0.8, W2 - arm, -D2 + back, D2 - 0.03, 0.3, seatH + 0.01, cush, 0.06);
       break;
     }
     case "chair": {
-      const leg = 0.035;
-      for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) box(sx * W2 - (sx > 0 ? leg : 0), sx * W2 + (sx < 0 ? leg : 0), sz * D2 - (sz > 0 ? leg : 0), sz * D2 + (sz < 0 ? leg : 0), 0, 0.43, main);
-      box(-W2, W2, -D2, D2, 0.43, 0.47, main);
-      box(-W2, W2, -D2, -D2 + 0.04, 0.47, h, main);
+      const legM = colorMat("#" + new THREE.Color(it.color).multiplyScalar(0.8).getHexString(), m.clip);
+      legs(W2 - 0.04, D2 - 0.04, 0.43, 0.018, legM);
+      box(-W2, W2, -D2, D2, 0.43, 0.475, main, 0.02);
+      for (const sx of [-1, 1]) box(sx * (W2 - 0.04) - 0.018, sx * (W2 - 0.04) + 0.018, -D2 + 0.02, -D2 + 0.055, 0.47, h, legM, 0.01);
+      box(-W2 + 0.03, W2 - 0.03, -D2 + 0.02, -D2 + 0.05, h - 0.2, h - 0.03, main, 0.015);
+      box(-W2 + 0.06, W2 - 0.06, -D2 + 0.025, -D2 + 0.045, 0.55, h - 0.24, main, 0.01);
       break;
     }
-    case "cooker":
-      box(-W2, W2, -D2, D2, 0, h - 0.02, m.white);
-      box(-W2, W2, -D2, D2, h - 0.02, h, m.dark);
-      box(-W2 + 0.05, W2 - 0.05, D2, D2 + 0.005, 0.12, h - 0.2, m.dark);
+    case "cooker": {
+      box(-W2, W2, -D2, D2, 0, h - 0.03, m.white, 0.01);
+      box(-W2, W2, -D2, D2, h - 0.03, h, colorMat("#1d1d1f", m.clip), 0.008);
+      for (const [bx, bz, r] of [[-0.14, -0.12, 0.07], [0.14, -0.12, 0.055], [-0.14, 0.13, 0.055], [0.14, 0.13, 0.07]]) {
+        cyl(r, h, h + 0.012, m.metal, bx * (w / 0.6), bz * (d / 0.6), r, 20);
+        cyl(r * 0.55, h + 0.012, h + 0.02, m.dark, bx * (w / 0.6), bz * (d / 0.6), r * 0.55, 16);
+      }
+      box(-W2 + 0.05, W2 - 0.05, D2, D2 + 0.012, 0.12, h - 0.2, colorMat("#202124", m.clip), 0.008);
+      box(-W2 + 0.07, W2 - 0.07, D2 + 0.012, D2 + 0.02, h - 0.24, h - 0.22, m.metal, 0.005);
+      for (let i = 0; i < 4; i++) cyl(0.018, 0, 0.025, m.dark, -W2 + 0.12 + i * ((w - 0.24) / 3), D2 + 0.012, 0.018, 12).rotation.set(Math.PI / 2, 0, 0);
       break;
+    }
     case "sink": {
-      box(-W2, W2, -D2, D2, 0, h - 0.03, main);
-      const n = w > 0.9 ? 2 : 1;
-      const bw = (w - 0.1 * (n + 1)) / n;
-      box(-W2, W2, -D2, D2, h - 0.03, h, m.white);
-      for (let i = 0; i < n; i++) box(-W2 + 0.1 + i * (bw + 0.1), -W2 + 0.1 + i * (bw + 0.1) + bw, -D2 + 0.1, D2 - 0.1, h - 0.005, h + 0.002, m.metal);
-      box(-0.015, 0.015, -D2 + 0.03, -D2 + 0.06, h, h + 0.25, m.metal);
+      const tall = h > 0.6;
+      if (tall) cabinet(0.1, h - 0.04, w > 0.9 ? 2 : 1, main, shade(it.color, 0.96));
+      if (tall) box(-W2 + 0.02, W2 - 0.02, -D2, D2 - 0.06, 0, 0.1, shade(it.color, 0.7), 0.004);
+      const top = it.key === "sinkK" ? colorMat("#5f5c58", m.clip) : m.white;
+      box(-W2, W2, -D2, D2 + 0.015, h - 0.04, h, top, 0.012);
+      const n = w > 1.0 && it.key === "sinkK" ? 2 : 1;
+      const bw = Math.min(0.48, (w - 0.15 * (n + 1)) / n);
+      for (let i = 0; i < n; i++) {
+        const cx = n === 2 ? (i ? 1 : -1) * (bw / 2 + 0.06) + (it.key === "sinkK" ? -W2 * 0.15 : 0) : 0;
+        box(cx - bw / 2, cx + bw / 2, -D2 + 0.12, D2 - 0.08, h - 0.005, h + 0.002, m.metal, 0.03);
+      }
+      const fx = 0;
+      cyl(0.02, h, h + 0.22, m.metal, fx, -D2 + 0.07, 0.02, 12);
+      box(fx - 0.015, fx + 0.015, -D2 + 0.06, -D2 + 0.24, h + 0.2, h + 0.23, m.metal, 0.01);
+      if (it.key === "vanity" || it.key === "basin") box(-W2 + 0.05, W2 - 0.05, -D2 - 0.01, -D2 + 0.0, h + 0.3, h + 0.95, colorMat("#d9e6ec", m.clip), 0.01).material = new THREE.MeshStandardMaterial({ color: "#dfe8ee", metalness: 1, roughness: 0.05, clippingPlanes: m.clip });
       break;
     }
     case "toilet": {
-      box(-W2, W2, -D2, -D2 + d * 0.28, 0, h, m.white);
-      const c = new THREE.CylinderGeometry(W2 * 0.95, W2 * 0.75, 0.42, 20);
-      c.scale(1, 1, (d * 0.7) / w);
-      c.translate(0, 0.21, -D2 + d * 0.28 + d * 0.33);
+      box(-W2, W2, -D2, -D2 + d * 0.26, 0.4, h, m.white, 0.04);
+      const c = new THREE.CylinderGeometry(W2 * 0.95, W2 * 0.7, 0.4, 24);
+      c.scale(1, 1, (d * 0.68) / w);
+      c.translate(0, 0.2, -D2 + d * 0.26 + d * 0.32);
       add(c, m.white);
+      const lid = new THREE.CylinderGeometry(W2 * 0.98, W2 * 0.98, 0.04, 24);
+      lid.scale(1, 1, (d * 0.7) / w);
+      lid.translate(0, 0.42, -D2 + d * 0.26 + d * 0.32);
+      add(lid, m.white);
+      box(-0.04, 0.04, -D2 + 0.06, -D2 + 0.12, h, h + 0.015, m.metal, 0.006);
       break;
     }
-    case "tub":
-      box(-W2, W2, -D2, D2, 0, h, m.white);
-      box(-W2 + 0.07, W2 - 0.07, -D2 + 0.07, D2 - 0.07, h - 0.01, h + 0.002, colorMat("#cfe6ee", m.clip));
+    case "tub": {
+      box(-W2, W2, -D2, D2, 0, h, m.white, 0.05);
+      box(-W2 + 0.07, W2 - 0.07, -D2 + 0.07, D2 - 0.07, h - 0.012, h + 0.001, colorMat("#cfe6ee", m.clip), 0.04);
+      cyl(0.02, h, h + 0.18, m.metal, 0, -D2 + 0.04, 0.02, 12);
+      box(-0.015, 0.015, -D2 + 0.03, -D2 + 0.16, h + 0.16, h + 0.19, m.metal, 0.008);
       break;
-    case "shower":
-      box(-W2, W2, -D2, D2, 0, Math.max(0.05, h), m.white);
-      box(-W2, W2, D2 - 0.01, D2, h, 2.0, m.glass);
-      box(W2 - 0.01, W2, -D2, D2, h, 2.0, m.glass);
-      box(-0.015, 0.015, -D2, -D2 + 0.03, 0.8, 2.0, m.metal);
+    }
+    case "shower": {
+      box(-W2, W2, -D2, D2, 0, Math.max(0.05, h), m.white, 0.02);
+      cyl(0.04, h, h + 0.004, m.metal, 0, 0, 0.04, 16);
+      box(-W2, W2, D2 - 0.01, D2, h, 2.0, m.glass, 0);
+      box(W2 - 0.01, W2, -D2, D2, h, 2.0, m.glass, 0);
+      box(-W2, W2, D2 - 0.02, D2, 1.98, 2.0, m.metal, 0);
+      box(W2 - 0.02, W2, -D2, D2, 1.98, 2.0, m.metal, 0);
+      cyl(0.012, 0.8, 2.0, m.metal, 0, -D2 + 0.03, 0.012, 10);
+      cyl(0.09, 1.98, 2.0, m.metal, 0, -D2 + 0.12, 0.09, 20);
       break;
-    case "stove":
-      box(-W2, W2, -D2, D2, 0, h, colorMat("#3d3a37", m.clip));
-      box(-W2 + 0.06, W2 - 0.06, D2, D2 + 0.005, h * 0.2, h * 0.7, colorMat("#d9822b", m.clip));
-      if (w < 0.8) {
-        const c = new THREE.CylinderGeometry(0.06, 0.06, 1.4, 12);
-        c.translate(0, h + 0.7, -D2 + 0.1);
-        add(c, m.dark);
+    }
+    case "stove": {
+      const body = colorMat("#2f2c29", m.clip);
+      const fire = w >= 0.8;
+      if (fire) {
+        box(-W2, W2, -D2, D2, 0, h, colorMat("#d7cfc2", m.clip), 0.02);
+        box(-W2 - 0.04, W2 + 0.04, -D2, D2 + 0.06, h - 0.08, h, colorMat("#efe9df", m.clip), 0.015);
+        box(-W2 + 0.2, W2 - 0.2, D2 - 0.02, D2 + 0.004, 0.15, h - 0.3, colorMat("#1c1a18", m.clip), 0.01);
+        box(-W2 + 0.28, W2 - 0.28, D2 - 0.03, D2 - 0.01, 0.17, 0.45, new THREE.MeshStandardMaterial({ color: "#ff8a2a", emissive: "#ff6a1a", emissiveIntensity: 1.4, clippingPlanes: m.clip }), 0.01);
+      } else {
+        box(-W2, W2, -D2, D2, 0.12, h, body, 0.03);
+        legs(W2 - 0.05, D2 - 0.05, 0.12, 0.02, body);
+        box(-W2 + 0.08, W2 - 0.08, D2, D2 + 0.012, h * 0.3, h * 0.72, colorMat("#1a1817", m.clip), 0.01);
+        box(-W2 + 0.11, W2 - 0.11, D2 + 0.012, D2 + 0.014, h * 0.34, h * 0.68, new THREE.MeshStandardMaterial({ color: "#ff9a3a", emissive: "#ff6a1a", emissiveIntensity: 1.2, clippingPlanes: m.clip }), 0);
+        box(-W2 - 0.01, W2 + 0.01, -D2 - 0.01, D2 + 0.01, h - 0.03, h, colorMat("#45413d", m.clip), 0.01);
+        cyl(0.065, h, h + 1.3, body, 0, -D2 + 0.12, 0.065, 16);
       }
       break;
-    case "wardrobe":
-      box(-W2, W2, -D2, D2, 0, h, main);
-      box(-0.004, 0.004, D2, D2 + 0.005, 0.05, h - 0.05, colorMat("#8a7a66", m.clip));
+    }
+    case "wardrobe": {
+      const n = w > 1.4 ? 3 : 2;
+      box(-W2 + 0.02, W2 - 0.02, -D2, D2 - 0.03, 0, 0.08, shade(it.color, 0.7), 0.005);
+      cabinet(0.08, h, n, main, shade(it.color, 1.05));
+      box(-W2 - 0.01, W2 + 0.01, -D2, D2 + 0.01, h - 0.03, h, main, 0.008);
       break;
-    default:
+    }
+    default: {
+      const k = it.key;
       if (isTable) {
-        const leg = 0.05;
-        box(-W2, W2, -D2, D2, h - 0.04, h, main);
-        for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) box(sx * (W2 - 0.04) - leg / 2, sx * (W2 - 0.04) + leg / 2, sz * (D2 - 0.04) - leg / 2, sz * (D2 - 0.04) + leg / 2, 0, h - 0.04, main);
-      } else box(-W2, W2, -D2, D2, 0, h, main);
+        const top = Math.min(0.04, h * 0.1);
+        box(-W2, W2, -D2, D2, h - top, h, main, 0.012);
+        const lx = W2 - 0.06;
+        const lz = D2 - 0.06;
+        for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) box(sx * lx - 0.025, sx * lx + 0.025, sz * lz - 0.025, sz * lz + 0.025, 0, h - top, shade(it.color, 0.9), 0.008);
+        if (h > 0.6) {
+          box(-lx, lx, -lz - 0.01, -lz + 0.01, h - top - 0.08, h - top, shade(it.color, 0.9), 0.004);
+          box(-lx, lx, lz - 0.01, lz + 0.01, h - top - 0.08, h - top, shade(it.color, 0.9), 0.004);
+        }
+      } else if (k === "shelf") {
+        const side = 0.025;
+        box(-W2, -W2 + side, -D2, D2, 0, h, main, 0.006);
+        box(W2 - side, W2, -D2, D2, 0, h, main, 0.006);
+        box(-W2, W2, -D2, -D2 + 0.012, 0, h, shade(it.color, 0.8), 0.003);
+        const nS = Math.max(3, Math.round(h / 0.38));
+        const cols = ["#8a3b2e", "#2f4b6e", "#c9a64a", "#3f6b4a", "#e2ddd2", "#6d4a7a", "#b5653f"];
+        for (let i = 0; i <= nS; i++) {
+          const y = (i * (h - 0.02)) / nS;
+          box(-W2 + side, W2 - side, -D2, D2, y, y + 0.022, main, 0.004);
+          if (i < nS) {
+            let x = -W2 + side + 0.02;
+            let c = i * 3;
+            while (x < W2 - side - 0.06) {
+              const bw = 0.025 + ((c * 37) % 7) * 0.006;
+              const bh = (h / nS) * (0.55 + ((c * 13) % 5) * 0.07);
+              box(x, x + bw, -D2 + 0.03, D2 - 0.03, y + 0.022, y + 0.022 + bh, colorMat(cols[c % cols.length], m.clip), 0.003);
+              x += bw + 0.004;
+              c++;
+            }
+          }
+        }
+      } else if (k === "fridge") {
+        box(-W2, W2, -D2, D2 - 0.03, 0, h, main, 0.03);
+        box(-W2 + 0.005, W2 - 0.005, D2 - 0.03, D2, h * 0.62 + 0.004, h - 0.005, main, 0.02);
+        box(-W2 + 0.005, W2 - 0.005, D2 - 0.03, D2, 0.005, h * 0.62 - 0.004, main, 0.02);
+        box(W2 - 0.08, W2 - 0.06, D2, D2 + 0.03, h * 0.66, h * 0.86, m.metal, 0.008);
+        box(W2 - 0.08, W2 - 0.06, D2, D2 + 0.03, h * 0.38, h * 0.58, m.metal, 0.008);
+      } else if (k === "tv") {
+        cabinet(0.06, h, Math.max(2, Math.round(w / 0.6)), main, shade(it.color, 1.08), true);
+        legs(W2 - 0.05, D2 - 0.05, 0.06, 0.015, m.dark);
+        const tw = Math.min(1.4, w * 0.75);
+        box(-tw / 2, tw / 2, -0.03, 0.0, h + 0.12, h + 0.12 + tw * 0.56, colorMat("#141518", m.clip), 0.01);
+        box(-tw / 2 + 0.015, tw / 2 - 0.015, 0.0, 0.003, h + 0.135, h + 0.105 + tw * 0.56, new THREE.MeshStandardMaterial({ color: "#1c2733", roughness: 0.1, metalness: 0.4, clippingPlanes: m.clip }), 0);
+        box(-0.12, 0.12, -0.08, 0.06, h, h + 0.015, m.dark, 0.006);
+        box(-0.02, 0.02, -0.03, 0.0, h + 0.015, h + 0.12, m.dark, 0.005);
+      } else if (k === "mirror" || k === "wmirror") {
+        box(-W2, W2, -D2, D2, 0, h, colorMat("#c9b08a", m.clip), 0.01);
+        box(-W2 + 0.03, W2 - 0.03, D2, D2 + 0.004, 0.03, h - 0.03, new THREE.MeshStandardMaterial({ color: "#e7eef2", metalness: 1, roughness: 0.04, clippingPlanes: m.clip }), 0);
+      } else if (k === "rad" || k === "heater") {
+        if (k === "rad") {
+          const n = Math.max(4, Math.round(w / 0.06));
+          for (let i = 0; i < n; i++) {
+            const x = -W2 + (i + 0.5) * (w / n);
+            box(x - w / n / 2 + 0.004, x + w / n / 2 - 0.004, -D2, D2, 0.12, h, m.white, 0.015);
+          }
+        } else {
+          cyl(W2, 0, h, m.white, 0, 0, D2, 24);
+          cyl(0.015, -0.15, 0, m.metal, -0.06, 0, 0.015, 8);
+          cyl(0.015, -0.15, 0, m.metal, 0.06, 0, 0.015, 8);
+        }
+      } else if (k === "hood") {
+        box(-W2, W2, -D2, D2, 0, h, m.metal, 0.01);
+        box(-0.13, 0.13, -D2, -D2 + 0.22, h, h + 0.6, m.metal, 0.01);
+      } else if (k === "piano") {
+        box(-W2, W2, -D2, -D2 + d * 0.55, 0, h, colorMat("#17130f", m.clip), 0.01);
+        box(-W2, W2, -D2, D2 - 0.06, 0.66, 0.72, colorMat("#17130f", m.clip), 0.01);
+        box(-W2 + 0.06, W2 - 0.06, -D2 + d * 0.55, D2 - 0.1, 0.72, 0.745, m.white, 0.004);
+        legs(W2 - 0.05, D2 - 0.1, 0.66, 0.025, colorMat("#17130f", m.clip));
+      } else if (k === "bench") {
+        box(-W2, W2, -D2, D2, h - 0.05, h, main, 0.015);
+        for (const sx of [-1, 1]) box(sx * (W2 - 0.08) - 0.025, sx * (W2 - 0.08) + 0.025, -D2 + 0.03, D2 - 0.03, 0, h - 0.05, shade(it.color, 0.85), 0.006);
+      } else if (k === "coat") {
+        cyl(0.02, 0, h, wood, 0, 0, 0.02, 10);
+        cyl(0.18, 0, 0.03, wood, 0, 0, 0.18, 16);
+        for (let i = 0; i < 4; i++) {
+          const a = (i / 4) * Math.PI * 2;
+          add(pipe(new THREE.Vector3(0, h - 0.15, 0), new THREE.Vector3(Math.cos(a) * 0.14, h - 0.05, Math.sin(a) * 0.14), 0.012, 8), wood);
+        }
+      } else if (h >= 0.35 && h <= 2.4 && d >= 0.25) {
+        // genel dolap / tezgâh / komodin
+        const counter = k.startsWith("counter") || k === "island";
+        const drawers = k === "night" || k === "dresser" || k === "buffet" || k === "shoe" || k === "kdesk";
+        const plinth = h > 0.6 ? 0.08 : 0.04;
+        box(-W2 + 0.02, W2 - 0.02, -D2, D2 - 0.06, 0, plinth, shade(it.color, 0.6), 0.004);
+        const topT = counter ? 0.035 : 0;
+        const ndoor = Math.max(1, Math.round(w / (drawers ? 0.5 : 0.45)));
+        if (drawers && h < 1.3) {
+          const rows = Math.max(2, Math.round((h - plinth) / 0.22));
+          box(-W2, W2, -D2, D2 - 0.02, plinth, h, main, 0.008);
+          const rh = (h - plinth - 0.006) / rows;
+          for (let r = 0; r < rows; r++) {
+            const y0 = plinth + 0.006 + r * rh;
+            box(-W2 + 0.006, W2 - 0.006, D2 - 0.02, D2, y0, y0 + rh - 0.006, shade(it.color, 1.05), 0.005);
+            handle(0, y0 + rh / 2, D2, false, Math.min(0.2, w * 0.35));
+          }
+        } else cabinet(plinth, h - topT, ndoor, main, shade(it.color, 1.04));
+        if (counter) box(-W2 - 0.005, W2 + 0.005, -D2, D2 + 0.025, h - topT, h, colorMat("#6f6a63", m.clip), 0.008);
+      } else box(-W2, W2, -D2, D2, 0, h, main, 0.012);
+    }
   }
   ig.userData = { pick: "item", id: it.id };
   ig.rotation.y = (-it.rot * Math.PI) / 180;
@@ -821,7 +1163,7 @@ function buildRoof(f: FullData, base: number, m: Mats, g: THREE.Group) {
       uv.push(u, v);
     }
     geo.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
-    const mat = new THREE.MeshStandardMaterial({ color: rf.color, roughness: rt === "metal" ? 0.45 : 0.8, metalness: rt === "metal" ? 0.35 : 0, side: THREE.DoubleSide, flatShading: true, map: rt ? getTex(rt) : null });
+    const mat = new THREE.MeshStandardMaterial({ color: rf.color, roughness: ROUGH[rt] ?? 0.8, metalness: rt === "metal" ? 0.45 : 0, side: THREE.DoubleSide, flatShading: true, map: rt ? getTex(rt) : null, normalMap: rt ? getNormal(rt) : null });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.userData = { pick: "roof" };
     mesh.castShadow = true;
@@ -830,6 +1172,84 @@ function buildRoof(f: FullData, base: number, m: Mats, g: THREE.Group) {
   };
   mkRoof(pos);
   mk(inf, m.infill);
+
+  /* oluk, yağmur borusu, mahya, baca */
+  const ex: THREE.BufferGeometry[] = [];
+  const gut = (a: THREE.Vector3, b: THREE.Vector3) => {
+    ex.push(pipe(a, b, 0.075, 12));
+  };
+  const eaveY = eave - 0.06;
+  const ins = 0.02;
+  const pipes: [number, number, number][] = []; // s, t, dış yön (t ekseninde ±1)
+  if (rf.kind === "gable" || rf.kind === "shed") {
+    const edges = rf.kind === "gable" ? [t0, t1] : [t0];
+    for (const te of edges) {
+      gut(P(s0, te + (te === t0 ? ins : -ins), eaveY), P(s1, te + (te === t0 ? ins : -ins), eaveY));
+      pipes.push([sw0 + 0.18, te, te === t0 ? -1 : 1], [sw1 - 0.18, te, te === t0 ? -1 : 1]);
+    }
+  } else if (rf.kind === "hip") {
+    gut(P(s0, t0 + ins, eaveY), P(s1, t0 + ins, eaveY));
+    gut(P(s0, t1 - ins, eaveY), P(s1, t1 - ins, eaveY));
+    gut(P(s0 + ins, t0, eaveY), P(s0 + ins, t1, eaveY));
+    gut(P(s1 - ins, t0, eaveY), P(s1 - ins, t1, eaveY));
+    pipes.push([sw0 + 0.18, t0, -1], [sw1 - 0.18, t1, 1]);
+  }
+  for (const [ps, te, dir] of pipes) {
+    const tw = dir < 0 ? tw0 - 0.07 : tw1 + 0.07;
+    const a = P(ps, te + (dir < 0 ? ins : -ins), eaveY);
+    const kink = P(ps, tw, eaveY - 0.35);
+    const foot = P(ps, tw, 0.05);
+    ex.push(pipe(a, kink, 0.045), pipe(kink, foot, 0.045));
+    ex.push(pipe(foot, P(ps, tw + (dir < 0 ? -0.25 : 0.25), 0.02), 0.045));
+  }
+  if (rf.kind === "gable") ex.push(pipe(P(s0 - 0.02, tc, top + THK - 0.01), P(s1 + 0.02, tc, top + THK - 0.01), 0.11, 12));
+  if (ex.length) {
+    const mg = mergeGeometries(ex.map(ni));
+    ex.forEach((q) => q.dispose());
+    if (mg) {
+      const mesh = new THREE.Mesh(mg, m.gutter);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      g.add(mesh);
+    }
+  }
+  // baca: sobası / şöminesi olan yerde çatıdan çıkar
+  const roofY = (s: number, t: number) => {
+    if (rf.kind === "gable") return top - Math.abs(t - tc) * tan;
+    if (rf.kind === "hip") return Math.min(top - Math.abs(t - tc) * tan, base + Math.min(s - sw0, sw1 - s) * tan);
+    return base + tan * (t - tw0 + o);
+  };
+  const seen: THREE.Vector2[] = [];
+  for (const fl of f.floors)
+    for (const it of fl.items) {
+      if (it.shape !== "stove") continue;
+      const sP = alongX ? it.x : it.y;
+      const tP = alongX ? it.y : it.x;
+      if (sP < sw0 || sP > sw1 || tP < tw0 || tP > tw1) continue;
+      if (seen.some((v) => Math.hypot(v.x - it.x, v.y - it.y) < 1.5)) continue;
+      seen.push(new THREE.Vector2(it.x, it.y));
+      const cs = 0.6;
+      const ry = Math.max(roofY(sP - cs / 2, tP - cs / 2), roofY(sP + cs / 2, tP + cs / 2), roofY(sP - cs / 2, tP + cs / 2), roofY(sP + cs / 2, tP - cs / 2)) + THK;
+      const hTop = ry + 0.7;
+      const cb = new THREE.BoxGeometry(cs, hTop - base, cs);
+      const P2 = cb.attributes.position;
+      const N2 = cb.attributes.normal;
+      const uv2 = cb.attributes.uv;
+      cb.translate(it.x, base + (hTop - base) / 2, it.y);
+      for (let i = 0; i < P2.count; i++) uv2.setXY(i, ...worldUV(P2.getX(i), P2.getY(i), P2.getZ(i), N2.getX(i), N2.getY(i), N2.getZ(i), 1));
+      const ch = new THREE.Mesh(cb, m.brick);
+      ch.castShadow = ch.receiveShadow = true;
+      g.add(ch);
+      const capG = new THREE.BoxGeometry(cs + 0.12, 0.08, cs + 0.12);
+      capG.translate(it.x, hTop + 0.04, it.y);
+      const cap = new THREE.Mesh(capG, m.band);
+      cap.castShadow = cap.receiveShadow = true;
+      g.add(cap);
+      const potG = pipe(new THREE.Vector3(it.x, hTop + 0.08, it.y), new THREE.Vector3(it.x, hTop + 0.32, it.y), 0.09, 12);
+      const pot = new THREE.Mesh(potG, m.gutter);
+      pot.castShadow = true;
+      g.add(pot);
+    }
 }
 
 /* ---------------- arsa ---------------- */
@@ -875,62 +1295,44 @@ function buildGround(f: FullData, g: THREE.Group) {
   // uzak tepeler (sis ile karışır)
   let seed = 7;
   const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
-  const hillMat = new THREE.MeshStandardMaterial({ color: "#7d9a6a", roughness: 1, flatShading: false });
+  const hillMat = new THREE.MeshStandardMaterial({ color: "#86a274", roughness: 1, flatShading: false });
   const hillMat2 = new THREE.MeshStandardMaterial({ color: "#6a8a63", roughness: 1 });
   for (let i = 0; i < 34; i++) {
     const a = (i / 34) * Math.PI * 2 + rnd() * 0.2;
-    const rad = 230 + rnd() * 90;
-    const hr = 26 + rnd() * 46;
-    const m = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 12), rnd() > 0.5 ? hillMat : hillMat2);
-    m.scale.set(hr * 1.8, hr * (0.28 + rnd() * 0.3), hr * 1.1);
+    const rad = 380 + rnd() * 120;
+    const hr = 30 + rnd() * 50;
+    const m = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 12), rnd() > 0.5 ? hillMat : hillMat2);
+    m.scale.set(hr * 2.2, hr * (0.16 + rnd() * 0.22), hr * 1.2);
     m.position.set(Math.cos(a) * rad, -hr * 0.1, Math.sin(a) * rad);
     m.rotation.y = -a;
     g.add(m);
   }
 }
 
-/** Tüm 3B sahneler için ortak: ton eşleme, ortam yansıması, gökyüzü kubbesi */
-export function decorateScene(scene: THREE.Scene, renderer: THREE.WebGLRenderer) {
-  renderer.toneMapping = THREE.NeutralToneMapping;
-  renderer.toneMappingExposure = 0.92;
-  const pm = new THREE.PMREMGenerator(renderer);
-  const env = pm.fromScene(new RoomEnvironment(), 0.04);
-  scene.environment = env.texture;
-  scene.environmentIntensity = 0.28;
-  pm.dispose();
-  const mat = new THREE.ShaderMaterial({
-    side: THREE.BackSide,
-    depthWrite: false,
-    fog: false,
-    uniforms: { top: { value: new THREE.Color("#6f9fd6") }, bottom: { value: new THREE.Color("#dbe8f3") } },
-    vertexShader: "varying vec3 vP; void main(){ vP = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }",
-    fragmentShader: [
-      "uniform vec3 top; uniform vec3 bottom; varying vec3 vP;",
-      "void main(){ float h = clamp(vP.y, 0.0, 1.0); gl_FragColor = vec4(mix(bottom, top, pow(h, 0.55)), 1.0);",
-      "#include <tonemapping_fragment>",
-      "#include <colorspace_fragment>",
-      "}",
-    ].join("\n"),
-  });
-  const dome = new THREE.Mesh(new THREE.SphereGeometry(800, 24, 16), mat);
-  dome.renderOrder = -10;
-  dome.frustumCulled = false;
-  scene.add(dome);
-  scene.userData.sky = mat;
-  return dome;
-}
-
-/** Gökyüzü kubbesi renklerini ufuk rengine göre ayarla */
-export function setSky(scene: THREE.Scene, horizon: THREE.Color) {
-  const m = scene.userData.sky as THREE.ShaderMaterial | undefined;
-  if (!m) return;
-  m.uniforms.bottom.value.copy(horizon);
-  m.uniforms.top.value.copy(horizon).lerp(new THREE.Color("#3f78c4"), 0.55 * Math.min(1, horizon.getHSL({ h: 0, s: 0, l: 0 }).l * 1.6));
-}
-
 /* ---------------- çevre nesneleri ---------------- */
 function buildEnv(objs: EnvObj[], g: THREE.Group) {
   const std = (color: string, rough = 0.9) => new THREE.MeshStandardMaterial({ color, roughness: rough, flatShading: true });
+  const leafMat = (color: string) => new THREE.MeshStandardMaterial({ color, roughness: 0.95, vertexColors: true });
+  /** organik yaprak kümesi: gürültüyle şişirilmiş küre, alt kısmı koyu */
+  const blob = (seed: number, bump = 0.16) => {
+    let q = new THREE.IcosahedronGeometry(1, 4) as THREE.BufferGeometry;
+    q.deleteAttribute("uv");
+    q.deleteAttribute("normal");
+    q = mergeVertices(q);
+    const P = q.attributes.position;
+    const col = new Float32Array(P.count * 3);
+    for (let i = 0; i < P.count; i++) {
+      const x = P.getX(i), y = P.getY(i), z = P.getZ(i);
+      const nz = Math.sin(x * 5.1 + seed) * Math.sin(y * 4.3 + seed * 1.7) * Math.sin(z * 4.7 + seed * 0.6) + 0.5 * Math.sin(x * 11 + y * 9 + seed * 2.1) * Math.sin(z * 10 - seed);
+      const k = 1 + bump * nz;
+      P.setXYZ(i, x * k, y * k, z * k);
+      const sh = 0.62 + 0.38 * Math.max(0, Math.min(1, (y + 1) / 1.6)) + 0.08 * nz;
+      col[i * 3] = col[i * 3 + 1] = col[i * 3 + 2] = sh;
+    }
+    q.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    q.computeVertexNormals();
+    return q;
+  };
   for (const o of objs) {
     const og = new THREE.Group();
     og.userData = { pick: "env", id: o.id };
@@ -954,35 +1356,67 @@ function buildEnv(objs: EnvObj[], g: THREE.Group) {
     };
     if (o.kind === "tree") {
       const th = h * 0.42;
-      add(new THREE.CylinderGeometry(Math.max(0.06, w * 0.035), Math.max(0.12, w * 0.07), th, 9), std("#6b4a2b"), 0, th / 2, 0);
+      const trunk = std("#6b4a2b");
+      trunk.flatShading = false;
+      add(new THREE.CylinderGeometry(Math.max(0.06, w * 0.03), Math.max(0.12, w * 0.065), th + 0.6, 10), trunk, 0, (th + 0.6) / 2, 0);
+      for (let i = 0; i < 3; i++) {
+        const a = (i / 3) * Math.PI * 2 + rr(i) * 2;
+        add(pipe(new THREE.Vector3(0, th * 0.75, 0), new THREE.Vector3(Math.cos(a) * w * 0.25, th + (h - th) * 0.35, Math.sin(a) * d * 0.25), Math.max(0.04, w * 0.015), 7), trunk);
+      }
       const ch = h - th;
       const blobs: [number, number, number, number][] = [
         [0, 0.5, 0, 1],
-        [0.28, 0.42, 0.1, 0.72],
-        [-0.26, 0.45, -0.08, 0.7],
-        [0.05, 0.78, -0.18, 0.62],
-        [-0.1, 0.72, 0.2, 0.6],
+        [0.3, 0.4, 0.12, 0.72],
+        [-0.28, 0.44, -0.1, 0.7],
+        [0.06, 0.78, -0.2, 0.62],
+        [-0.12, 0.72, 0.22, 0.6],
+        [0.18, 0.62, -0.28, 0.55],
       ];
       blobs.forEach((b, i) => {
-        const m = add(new THREE.IcosahedronGeometry(0.5, 2), std("#ffffff"), b[0] * w * 0.7, th + ch * b[1], b[2] * d * 0.7);
-        (m.material as THREE.MeshStandardMaterial).color = shade(o.color, i + 1);
-        m.scale.set(w * 0.62 * b[3], ch * 0.62 * b[3], d * 0.62 * b[3]);
+        const mt = leafMat("#ffffff");
+        mt.color = shade(o.color, i + 1);
+        const m2 = add(blob(hs * 0.37 + i * 3.1), mt, b[0] * w * 0.7, th + ch * b[1], b[2] * d * 0.7);
+        m2.scale.set(w * 0.33 * b[3], ch * 0.33 * b[3], d * 0.33 * b[3]);
       });
     } else if (o.kind === "pine") {
-      const th = h * 0.14;
-      add(new THREE.CylinderGeometry(0.07, 0.14, th + 0.4, 8), std("#5a3d22"), 0, (th + 0.4) / 2, 0);
-      const tiers = 5;
+      const th = h * 0.12;
+      const trunk = std("#5a3d22");
+      trunk.flatShading = false;
+      add(new THREE.CylinderGeometry(0.06, 0.15, th + 0.6, 9), trunk, 0, (th + 0.6) / 2, 0);
+      const tiers = 6;
       for (let i = 0; i < tiers; i++) {
         const t = i / (tiers - 1);
-        const ch = (h - th) * 0.34;
-        const k = 1 - t * 0.7;
-        const cone = add(new THREE.ConeGeometry(0.5, ch, 12), std("#ffffff"), 0, th + ch / 2 + t * (h - th - ch) * 0.98, 0);
-        (cone.material as THREE.MeshStandardMaterial).color = shade(o.color, i + 3);
-        cone.scale.set(w * k, 1, d * k);
+        const chh = (h - th) * 0.3;
+        const k = 1 - t * 0.78;
+        let cone = new THREE.ConeGeometry(0.5, chh, 18, 3) as THREE.BufferGeometry;
+        cone.deleteAttribute("uv");
+        cone.deleteAttribute("normal");
+        cone = mergeVertices(cone);
+        const P = cone.attributes.position;
+        const col = new Float32Array(P.count * 3);
+        for (let j = 0; j < P.count; j++) {
+          const x = P.getX(j), y = P.getY(j), z = P.getZ(j);
+          const ang = Math.atan2(z, x);
+          const jag = y < -chh / 2 + 0.01 ? 1 + 0.18 * Math.sin(ang * 9 + i * 1.7) : 1 + 0.06 * Math.sin(ang * 7 + y * 6);
+          P.setXYZ(j, x * jag, y + (y < -chh / 2 + 0.01 ? -0.06 * Math.abs(Math.sin(ang * 9 + i)) : 0), z * jag);
+          const sh = 0.6 + 0.4 * ((y + chh / 2) / chh);
+          col[j * 3] = col[j * 3 + 1] = col[j * 3 + 2] = sh;
+        }
+        cone.setAttribute("color", new THREE.BufferAttribute(col, 3));
+        cone.computeVertexNormals();
+        const mt = leafMat("#ffffff");
+        mt.color = shade(o.color, i + 3);
+        const cm = add(cone, mt, 0, th + chh / 2 + t * (h - th - chh) * 0.98, 0);
+        cm.scale.set(w * k, 1, d * k);
+        cm.rotation.y = i * 0.7;
       }
     } else if (o.kind === "bush") {
-      const m = add(new THREE.IcosahedronGeometry(0.5, 1), std(o.color), 0, h * 0.5, 0);
-      m.scale.set(w, h, d);
+      for (let i = 0; i < 3; i++) {
+        const mt = leafMat("#ffffff");
+        mt.color = shade(o.color, i + 2);
+        const bm = add(blob(hs * 0.21 + i * 2.3, 0.22), mt, (i - 1) * w * 0.22, h * (0.42 + (i % 2) * 0.08), (i % 2 ? 1 : -1) * d * 0.12);
+        bm.scale.set(w * 0.38, h * 0.5, d * 0.38);
+      }
     } else if (o.kind === "road") {
       add(new THREE.BoxGeometry(w, Math.max(0.04, h), d), std(o.color, 1), 0, Math.max(0.04, h) / 2, 0);
       const long = d >= w;
@@ -1013,6 +1447,64 @@ function buildEnv(objs: EnvObj[], g: THREE.Group) {
       rg.translate(0, 0, -(len + 0.6) / 2);
       const rm = add(rg, std("#8a4a3a"), 0, h, 0);
       if (alongX) rm.rotation.y = Math.PI / 2;
+      // pencereler
+      const win = new THREE.MeshStandardMaterial({ color: "#5f7d92", roughness: 0.1, metalness: 0.3 });
+      const frm = std("#f3f1ec");
+      const floors = Math.max(1, Math.floor(h / 2.7));
+      for (const [len2, dep, rot] of [[w, d, 0], [d, w, Math.PI / 2]] as [number, number, number][]) {
+        const nW = Math.max(1, Math.floor(len2 / 2.2));
+        for (let fl = 0; fl < floors; fl++)
+          for (let i = 0; i < nW; i++)
+            for (const sd of [1, -1]) {
+              const x = -len2 / 2 + (i + 0.5) * (len2 / nW);
+              const y = 0.9 + fl * 2.7 + 0.65;
+              const fg = new THREE.BoxGeometry(1.0, 1.3, 0.06);
+              const gg = new THREE.BoxGeometry(0.86, 1.16, 0.07);
+              for (const q of [fg, gg]) {
+                q.translate(x, y, sd * (dep / 2 + 0.01));
+                q.rotateY(rot);
+              }
+              add(fg, frm);
+              add(gg, win);
+            }
+      }
+    } else if (o.kind === "fence") {
+      // ahşap çit: dikmeler, iki kuşak ve tahtalar
+      const along = w >= d;
+      const L = along ? w : d;
+      const wd = std(o.color, 0.85);
+      wd.flatShading = false;
+      wd.map = getTex("wood");
+      const parts: THREE.BufferGeometry[] = [];
+      const bx = (a0: number, a1: number, y0: number, y1: number, th: number) => {
+        const b = new THREE.BoxGeometry(along ? a1 - a0 : th, y1 - y0, along ? th : a1 - a0);
+        b.translate(along ? (a0 + a1) / 2 : 0, (y0 + y1) / 2, along ? 0 : (a0 + a1) / 2);
+        parts.push(b);
+      };
+      const np = Math.max(2, Math.round(L / 2) + 1);
+      for (let i = 0; i < np; i++) {
+        const t = -L / 2 + (i * L) / (np - 1);
+        bx(t - 0.05, t + 0.05, 0, h + 0.05, 0.1);
+      }
+      bx(-L / 2, L / 2, h * 0.25, h * 0.25 + 0.07, 0.04);
+      bx(-L / 2, L / 2, h * 0.75, h * 0.75 + 0.07, 0.04);
+      const nb = Math.floor(L / 0.16);
+      for (let i = 0; i < nb; i++) {
+        const t = -L / 2 + 0.05 + i * 0.16;
+        bx(t, t + 0.09, 0.05, h - ((i % 2) * 0.04), 0.02);
+      }
+      const mg = mergeGeometries(parts);
+      parts.forEach((q) => q.dispose());
+      if (mg) {
+        const P = mg.attributes.position;
+        const uv = new Float32Array(P.count * 2);
+        for (let i = 0; i < P.count; i++) {
+          uv[i * 2] = (along ? P.getX(i) : P.getZ(i)) * 2;
+          uv[i * 2 + 1] = P.getY(i);
+        }
+        mg.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+        add(mg, wd);
+      }
     } else {
       add(new THREE.BoxGeometry(w, h, Math.max(0.1, d)), std(o.color), 0, h / 2, 0);
     }
@@ -1056,7 +1548,7 @@ export function buildHouse(f: FullData, fi: number, v: V3) {
     const m = v.cut && i === topShown ? clipped : plain;
     buildSlab(fl, i > 0 ? f.floors[i - 1] : null, bases[i], plain, fg);
     buildRoomFloors(fl, i > 0 ? f.floors[i - 1] : null, bases[i], m.clip, fg);
-    buildWalls(fl, bases[i], m, v.cut && i === topShown, fg);
+    buildWalls(fl, bases[i], m, v.cut && i === topShown, fg, i);
     for (const st of fl.stairs) buildStair(st, fl.height, bases[i], m, fg);
     if (v.items) for (const it of fl.items) buildItem(it, bases[i], m, fg);
   }
@@ -1072,7 +1564,18 @@ export function buildHouse(f: FullData, fi: number, v: V3) {
   }
   buildGround(f, ground);
   buildEnv(f.env.objs, env);
-  return { house, ground, env, roofShown };
+  return { house, ground, env, roofShown, cutPlane };
+}
+
+/** Gece: pencereler içeriden sıcak ışıkla parlar */
+export function setNight(root: THREE.Object3D, night: number) {
+  root.traverse((o) => {
+    if (!o.userData.glass) return;
+    const mt = (o as THREE.Mesh).material as THREE.MeshStandardMaterial;
+    mt.emissive.set("#ffc27a");
+    mt.emissiveIntensity = night > 0.05 ? 0.25 + 1.6 * night : 0;
+    mt.opacity = 0.32 + 0.55 * night;
+  });
 }
 
 /** Sahnedeki tüm geometri ve malzemeleri serbest bırak */

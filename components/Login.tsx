@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { VERSION } from "./App";
+import { HouseLogo, Landscape } from "./HouseArt";
 
 export default function Login({ onDone }: { onDone: () => void }) {
   const [pw, setPw] = useState("");
@@ -22,10 +23,14 @@ export default function Login({ onDone }: { onDone: () => void }) {
   }
 
   return (
-    <div className="center">
+    <div className="center loginbg">
+      <Landscape />
       <form className="card login" onSubmit={submit}>
-        <h1>Köy Evi Tasarım</h1>
-        <p className="muted">Devam etmek için şifreni gir.</p>
+        <div className="brand">
+          <HouseLogo size={42} />
+          <h1>Köy Evi Tasarım</h1>
+        </div>
+        <p className="muted">Hayalindeki köy evini çiz, 3D gez, malzemesini hesapla. Devam etmek için şifreni gir.</p>
         <input
           type="password"
           placeholder="Şifre"

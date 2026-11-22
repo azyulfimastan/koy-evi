@@ -2,6 +2,7 @@ import * as THREE from "three";
 
 /** Kaplama seçenekleri (Türkçe adlarıyla) */
 export const EXT_TEX: [string, string][] = [["plain", "Düz sıva"], ["brick", "Tuğla"], ["stone", "Taş"], ["wood", "Ahşap kaplama"], ["rough", "Kaba sıva"], ["adobe", "Kerpiç / toprak sıva"]];
+export const BASE_TEX: [string, string][] = [["stone", "Taş"], ["brick", "Tuğla"], ["rough", "Kaba sıva"], ["concrete", "Beton"]];
 export const INT_TEX: [string, string][] = [["plain", "Düz boya"], ["wood", "Ahşap lambri"], ["fayans", "Fayans"], ["rough", "Kaba sıva"]];
 export const ROOF_TEX: [string, string][] = [["tile", "Kiremit"], ["metal", "Sac (metal)"], ["shingle", "Şingle"], ["slate", "Kayrak taş"], ["plain", "Düz"]];
 export const FLOOR_TEX: [string, string][] = [["none", "Varsayılan"], ["parquet", "Parke"], ["fayans", "Fayans"], ["concrete", "Beton"], ["carpet", "Halı / düz"], ["laminate", "Laminat"], ["marble", "Mermer"]];
@@ -270,3 +271,46 @@ export function getTex(key: string): THREE.CanvasTexture | null {
   cache.set(key, t);
   return t;
 }
+
+/** Doku için kabartma (normal) haritası: açık renk = yüksek, koyu derz = çukur */
+const NSTR: Record<string, number> = { brick: 3, stone: 3.5, wood: 1.2, tile: 3, metal: 2.2, shingle: 2.2, slate: 2.4, parquet: 0.9, laminate: 0.6, fayans: 2, marble: 0.35, rough: 2.5, adobe: 1.4, concrete: 0.8, grass: 1.6, carpet: 1 };
+const ncache = new Map<string, THREE.CanvasTexture>();
+export function getNormal(key: string): THREE.CanvasTexture | null {
+  if (!NSTR[key]) return null;
+  const hit = ncache.get(key);
+  if (hit) return hit;
+  const t = getTex(key);
+  if (!t) return null;
+  const src = t.image as HTMLCanvasElement;
+  const N = src.width;
+  const d = src.getContext("2d")!.getImageData(0, 0, N, N).data;
+  const hgt = new Float32Array(N * N);
+  for (let i = 0; i < N * N; i++) hgt[i] = (d[i * 4] * 0.3 + d[i * 4 + 1] * 0.59 + d[i * 4 + 2] * 0.11) / 255;
+  const c = document.createElement("canvas");
+  c.width = c.height = N;
+  const g = c.getContext("2d")!;
+  const out = g.createImageData(N, N);
+  const s = NSTR[key];
+  const H = (x: number, y: number) => hgt[((y + N) % N) * N + ((x + N) % N)];
+  for (let y = 0; y < N; y++)
+    for (let x = 0; x < N; x++) {
+      const dx = (H(x + 1, y - 1) + 2 * H(x + 1, y) + H(x + 1, y + 1) - H(x - 1, y - 1) - 2 * H(x - 1, y) - H(x - 1, y + 1)) * s;
+      const dy = (H(x - 1, y + 1) + 2 * H(x, y + 1) + H(x + 1, y + 1) - H(x - 1, y - 1) - 2 * H(x, y - 1) - H(x + 1, y - 1)) * s;
+      const l = Math.hypot(dx, dy, 1);
+      const k = (y * N + x) * 4;
+      out.data[k] = (-dx / l) * 127.5 + 127.5;
+      out.data[k + 1] = (dy / l) * 127.5 + 127.5;
+      out.data[k + 2] = (1 / l) * 127.5 + 127.5;
+      out.data[k + 3] = 255;
+    }
+  g.putImageData(out, 0, 0);
+  const nt = new THREE.CanvasTexture(c);
+  nt.wrapS = nt.wrapT = THREE.RepeatWrapping;
+  nt.colorSpace = THREE.NoColorSpace;
+  nt.anisotropy = 4;
+  ncache.set(key, nt);
+  return nt;
+}
+
+/** Kaplamaya göre pürüzlülük (parlaklık) */
+export const ROUGH: Record<string, number> = { parquet: 0.5, laminate: 0.45, fayans: 0.22, marble: 0.15, concrete: 0.85, carpet: 1, metal: 0.4, tile: 0.75, slate: 0.6, shingle: 0.9, brick: 0.9, stone: 0.92, wood: 0.7, plain: 0.92, rough: 0.97, adobe: 0.97 };

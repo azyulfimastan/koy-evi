@@ -28,7 +28,11 @@ export async function listProjects(): Promise<Project[]> {
     const files = await fs.readdir(DIR);
     for (const f of files) {
       if (!f.endsWith(".json")) continue;
-      all.push(JSON.parse(await fs.readFile(path.join(DIR, f), "utf8")));
+      try {
+        all.push(JSON.parse(await fs.readFile(path.join(DIR, f), "utf8")));
+      } catch {
+        /* bozuk dosya: listeyi bozmasın */
+      }
     }
   }
   return all.sort((a, b) => b.updatedAt - a.updatedAt);
@@ -56,7 +60,10 @@ export async function saveProject(p: Project): Promise<void> {
     });
   } else {
     await fs.mkdir(DIR, { recursive: true });
-    await fs.writeFile(path.join(DIR, p.id + ".json"), body);
+    // önce geçici dosyaya yaz, sonra taşı (aynı anda iki kayıt dosyayı bozmasın)
+    const tmp = path.join(DIR, `${p.id}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`);
+    await fs.writeFile(tmp, body);
+    await fs.rename(tmp, path.join(DIR, p.id + ".json"));
   }
 }
 

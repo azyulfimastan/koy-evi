@@ -1,12 +1,13 @@
 import * as THREE from "three";
 import type { FullData } from "./types";
 import { computeReport, type Line } from "./quantities";
-import { buildHouse, decorateScene, setSky, disposeTree } from "./scene3d";
-import { sunDir } from "./env";
+import { buildHouse, disposeTree, setNight } from "./scene3d";
+import { applyLookSun, disposeLook, renderLook, setupLook } from "./look";
 import { rasterize, regionAt, wallGeom, endJoins } from "./rooms";
 import { drawItem } from "./furniture";
 import { drawStair } from "./stairs";
 import { fmt, bounds } from "./geo";
+import { fillMaskWithPattern, floorColor, texPattern } from "./plan2d";
 
 const PW = 1240;
 const PH = 1754;
@@ -16,25 +17,16 @@ const MUTE = "#7a7466";
 const FONT = "system-ui, 'Segoe UI', Roboto, Arial, sans-serif";
 
 /** Ev için 3B resim (ekran dışı) */
-export function render3d(f: FullData, dir: [number, number, number], w = 1100, h = 700, ortho = false): HTMLCanvasElement {
+export function render3d(f: FullData, dir: [number, number, number], w = 1100, h = 700, ortho = false, zoom = 1, shadow = 4096): HTMLCanvasElement {
   const canvas = document.createElement("canvas");
   canvas.width = w;
   canvas.height = h;
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
   renderer.setSize(w, h, false);
-  renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFShadowMap;
   const scene = new THREE.Scene();
-  const sky = new THREE.Color("#dbe8f3");
-  scene.background = sky;
-  scene.fog = new THREE.Fog("#dbe8f3", 90, 300);
-  decorateScene(scene, renderer);
-  setSky(scene, sky);
-  scene.add(new THREE.HemisphereLight("#f2f6ff", "#a89a7c", 1.7));
-  const sun = new THREE.DirectionalLight("#fff4e0", 2.6);
-  sun.castShadow = f.env.sun.shadows;
-  sun.shadow.mapSize.set(2048, 2048);
-  scene.add(sun, sun.target);
+  scene.fog = new THREE.Fog("#cfdbe6", 120, 640);
+  const look = setupLook(renderer, scene, { shadow, composer: true, msaa: 4 });
+  look.composer?.setSize(w, h);
   const top = Math.max(0, f.floors.length - 1);
   const b = buildHouse(f, top, { floors: "all", roof: true, items: true, cut: false });
   b.house.traverse((o) => {
@@ -57,15 +49,10 @@ export function render3d(f: FullData, dir: [number, number, number], w = 1100, h
   if (box.isEmpty()) box.setFromCenterAndSize(new THREE.Vector3(0, 1, 0), new THREE.Vector3(10, 2, 10));
   const c = box.getCenter(new THREE.Vector3());
   const R = Math.max(8, box.getSize(new THREE.Vector3()).length() / 2);
-  const d = sunDir({ ...f.env.sun, hour: Math.min(17, Math.max(9, f.env.sun.hour)) });
-  sun.position.set(c.x + d.x * R * 3, Math.max(2, c.y + Math.max(0.3, d.y) * R * 3), c.z + d.z * R * 3);
-  sun.target.position.copy(c);
-  const sc = sun.shadow.camera;
-  sc.left = sc.bottom = -R * 1.5;
-  sc.right = sc.top = R * 1.5;
-  sc.near = 0.5;
-  sc.far = R * 9;
-  sc.updateProjectionMatrix();
+  const all = box.clone();
+  all.union(new THREE.Box3().setFromObject(b.env));
+  applyLookSun(look, { ...f.env.sun, hour: Math.min(17, Math.max(9, f.env.sun.hour)) }, all);
+  setNight(b.house, 0);
   const v = new THREE.Vector3(...dir).normalize();
   let cam: THREE.Camera;
   if (ortho) {
@@ -87,20 +74,21 @@ export function render3d(f: FullData, dir: [number, number, number], w = 1100, h
   } else {
     const pc = new THREE.PerspectiveCamera(45, w / h, 0.1, 1000);
     const fov = (pc.fov * Math.PI) / 180;
-    const fit = (R / Math.sin(fov / 2) / Math.min(1, pc.aspect)) * 0.95;
+    const fit = (R / Math.sin(fov / 2) / Math.min(1, pc.aspect)) * 0.95 * zoom;
     pc.position.copy(c).addScaledVector(v, fit);
     pc.near = Math.max(0.05, fit / 200);
     pc.lookAt(c);
     pc.updateProjectionMatrix();
     cam = pc;
   }
-  renderer.render(scene, cam);
+  renderLook(look, cam, true);
   // sonucu kalıcı 2D tuvale kopyala, GL'yi bırak
   const out = document.createElement("canvas");
   out.width = w;
   out.height = h;
   out.getContext("2d")!.drawImage(canvas, 0, 0);
   disposeTree(scene);
+  disposeLook(look);
   renderer.dispose();
   renderer.forceContextLoss();
   return out;
@@ -126,14 +114,18 @@ export function renderPlan(f: FullData, fi: number, w = 1080, h = 1000): HTMLCan
   const oy = (h - s * (bb.maxY - bb.minY)) / 2 - bb.minY * s;
   const X = (x: number) => x * s + ox;
   const Y = (y: number) => y * s + oy;
-  // arsa
+  // arsa (çim dokulu)
   if (f.plot.points.length > 1) {
+    g.beginPath();
+    f.plot.points.forEach((p, i) => (i ? g.lineTo(X(p.x), Y(p.y)) : g.moveTo(X(p.x), Y(p.y))));
+    if (f.plot.closed) {
+      g.closePath();
+      g.fillStyle = texPattern(g, "grass", "#a9c98a", s, ox, oy, 0.12) ?? "#e4eed8";
+      g.fill();
+    }
     g.strokeStyle = "#7a9a5a";
     g.lineWidth = 2;
     g.setLineDash([10, 6]);
-    g.beginPath();
-    f.plot.points.forEach((p, i) => (i ? g.lineTo(X(p.x), Y(p.y)) : g.moveTo(X(p.x), Y(p.y))));
-    if (f.plot.closed) g.closePath();
     g.stroke();
     g.setLineDash([]);
   }
@@ -143,19 +135,16 @@ export function renderPlan(f: FullData, fi: number, w = 1080, h = 1000): HTMLCan
   for (const rm of fl.rooms) {
     const reg = regionAt(ras, rm.seed);
     if (!reg || reg.open) continue;
-    g.fillStyle = rm.color + "55";
-    const cs = reg.cell * s;
-    for (let j = 0; j < reg.h; j++) {
-      let i = 0;
-      while (i < reg.w) {
-        if (reg.mask[j * reg.w + i]) {
-          let k = i;
-          while (k < reg.w && reg.mask[j * reg.w + k]) k++;
-          g.fillRect(X(reg.x0 + i * reg.cell), Y(reg.y0 + j * reg.cell), (k - i) * cs + 0.6, cs + 0.6);
-          i = k;
-        } else i++;
-      }
-    }
+    const mk = document.createElement("canvas");
+    mk.width = reg.w;
+    mk.height = reg.h;
+    const mg = mk.getContext("2d")!;
+    const img = mg.createImageData(reg.w, reg.h);
+    for (let i = 0; i < reg.mask.length; i++) if (reg.mask[i]) img.data[i * 4 + 3] = 255;
+    mg.putImageData(img, 0, 0);
+    const tex = rm.floor && rm.floor !== "none" ? rm.floor : "";
+    const pat = tex ? texPattern(g, tex, floorColor(rm.floor, rm.floorColor, rm.color), s, ox, oy) : null;
+    fillMaskWithPattern(g, mk, X(reg.x0), Y(reg.y0), reg.w * reg.cell * s, reg.h * reg.cell * s, pat ?? rm.color + "c0", 1);
     labels.push({ t: rm.name, a: fmt(reg.area, 1) + " m²", x: reg.cx, y: reg.cy });
   }
   // duvarlar

@@ -6,7 +6,7 @@ export async function GET() {
   if (!(await isAuthed())) return NextResponse.json({ error: "yetkisiz" }, { status: 401 });
   const all = await listProjects();
   return NextResponse.json(
-    all.map((p) => ({ id: p.id, name: p.name, updatedAt: p.updatedAt, createdAt: p.createdAt }))
+    all.map((p) => ({ id: p.id, name: p.name, updatedAt: p.updatedAt, createdAt: p.createdAt, thumb: p.thumb }))
   );
 }
 

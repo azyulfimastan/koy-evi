@@ -1,10 +1,10 @@
 "use client";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { FullData } from "@/lib/types";
-import { buildHouse, decorateScene, setSky, disposeTree, floorBases, roomAtPoint, type V3 } from "@/lib/scene3d";
-import { sunDir } from "@/lib/env";
+import { buildHouse, disposeTree, floorBases, roomAtPoint, setNight, type V3 } from "@/lib/scene3d";
+import { applyLookSun, disposeLook, renderLook, resizeLook, setLookClip, setupLook, type Look } from "@/lib/look";
 
 type Preset = "corner" | "front" | "side" | "top" | "keep";
 
@@ -22,8 +22,8 @@ type Api = {
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
   controls: OrbitControls;
-  sun: THREE.DirectionalLight;
-  hemi: THREE.HemisphereLight;
+  look: Look;
+  lamp: THREE.PointLight;
   root: THREE.Group | null;
   hl: THREE.Object3D | null;
   render: () => void;
@@ -49,6 +49,15 @@ export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onE
   const ws = useRef({ yaw: 0, pitch: 0, x: 0, z: 0, y: 1.6, fov: 70 });
   const held = useRef(new Set<string>());
   const raf = useRef(0);
+  const [hq, setHq] = useState(() => {
+    try {
+      return localStorage.getItem("kte_q") !== "low";
+    } catch {
+      return true;
+    }
+  });
+  const hqRef = useRef(hq);
+  hqRef.current = hq;
 
   // güneş dışındaki her şey değişirse sahne yeniden kurulur
   const key = useMemo(() => JSON.stringify([full.plot, full.floors, full.roof, full.fin, full.env.objs, full.custom]), [full]);
@@ -57,27 +66,20 @@ export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onE
   useEffect(() => {
     const el = host.current;
     if (!el) return;
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-    renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFShadowMap;
+    const coarse = window.matchMedia?.("(pointer: coarse)").matches ?? false;
+    const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+    const dpr = Math.min(window.devicePixelRatio || 1, coarse ? 1.75 : 2);
+    renderer.setPixelRatio(dpr);
     renderer.localClippingEnabled = true;
     renderer.domElement.className = "v3cv";
     el.insertBefore(renderer.domElement, el.firstChild);
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color("#dbe8f3");
-    scene.fog = new THREE.Fog("#dbe8f3", 90, 300);
-    decorateScene(scene, renderer);
-    const hemi = new THREE.HemisphereLight("#f2f6ff", "#a89a7c", 1.7);
-    scene.add(hemi);
-    scene.add(new THREE.AmbientLight("#ffffff", 0.35));
-    const sun = new THREE.DirectionalLight("#fff4e0", 2.6);
-    sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
-    sun.shadow.bias = -0.0006;
-    sun.shadow.normalBias = 0.04;
-    scene.add(sun, sun.target);
+    scene.fog = new THREE.Fog("#cfdbe6", 120, 640);
+    const look = setupLook(renderer, scene, { shadow: coarse ? 2048 : 4096, composer: true, msaa: 4 });
+    // iç mekân lambası (yalnızca odaya girince yanar)
+    const lamp = new THREE.PointLight("#ffe4bd", 0, 14, 1.4);
+    scene.add(lamp);
 
     const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 1000);
     camera.rotation.order = "YXZ";
@@ -106,13 +108,30 @@ export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onE
       const sy = nx * f.x + nz * f.z;
       c.style.transform = `rotate(${(Math.atan2(sx, sy) * 180) / Math.PI}deg)`;
     };
+    // dokunmatik cihazda: hareket ederken hızlı çizim, durunca yüksek kalite
+    let moving = false;
+    let refineT = 0;
     const render = () => {
-      renderer.render(scene, camera);
+      const hq = hqRef.current && !(coarse && (moving || held.current.size > 0));
+      renderLook(look, camera, hq);
       updCompass();
+      if (!hq && hqRef.current) {
+        clearTimeout(refineT);
+        refineT = window.setTimeout(() => {
+          if (!moving && held.current.size === 0) {
+            renderLook(look, camera, true);
+          }
+        }, 180);
+      }
     };
     controls.addEventListener("change", render);
     controls.addEventListener("start", () => {
+      moving = true;
       if (api.current) api.current.userMoved = true;
+    });
+    controls.addEventListener("end", () => {
+      moving = false;
+      render();
     });
 
     const resize = () => {
@@ -120,6 +139,7 @@ export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onE
       const h = el.clientHeight;
       if (!w || !h) return;
       renderer.setSize(w, h, false);
+      resizeLook(look, w, h, dpr);
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
       // kullanıcı henüz kamerayı oynatmadıysa, ekran boyutuna göre yeniden kadrajla
@@ -162,6 +182,8 @@ export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onE
         if (!blocked(fl, nx, w.z)) w.x = nx;
         if (!blocked(fl, w.x, nz)) w.z = nz;
         camera.position.set(w.x, w.y, w.z);
+        lamp.position.x = w.x;
+        lamp.position.z = w.z;
       }
       applyLook();
       render();
@@ -173,7 +195,7 @@ export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onE
         raf.current = requestAnimationFrame(tick);
       }
     };
-    api.current = { renderer, scene, camera, controls, sun, hemi, root: null, hl: null, render, framed: false, bounds: new THREE.Box3(), kick, userMoved: false };
+    api.current = { renderer, scene, camera, controls, look, lamp, root: null, hl: null, render, framed: false, bounds: new THREE.Box3(), kick, userMoved: false };
     resize();
 
     /* ---------- dokunma / fare: seçme + gezinme ---------- */
@@ -254,9 +276,14 @@ export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onE
         pinch = d;
       }
       applyLook();
+      moving = coarse;
       render();
     };
     const onUp = (e: PointerEvent) => {
+      if (moving && walkRef.current) {
+        moving = false;
+        render();
+      }
       if (tap && tap.ok && ptrs.size === 1 && performance.now() - tap.t < 600) doPick(e.clientX, e.clientY);
       ptrs.delete(e.pointerId);
       if (ptrs.size === 0) tap = null;
@@ -307,7 +334,9 @@ export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onE
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
       cancelAnimationFrame(raf.current);
+      clearTimeout(refineT);
       if (api.current?.root) disposeTree(api.current.root);
+      disposeLook(look);
       renderer.dispose();
       renderer.domElement.remove();
       api.current = null;
@@ -373,7 +402,8 @@ export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onE
     }
     const f = fullRef.current;
     const t0 = performance.now();
-    const { house, ground, env } = buildHouse(f, fi, v3);
+    const { house, ground, env, cutPlane } = buildHouse(f, fi, v3);
+    setLookClip(a.look, v3.cut ? [cutPlane] : []);
     (window as unknown as { __v3ms?: number }).__v3ms = Math.round(performance.now() - t0);
     const root = new THREE.Group();
     root.add(ground, house, env);
@@ -392,7 +422,7 @@ export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onE
       a.framed = true;
     } else if (k !== viewKey.current && !walkRef.current) frame(a, house, "keep");
     viewKey.current = k;
-    applySun(a, f);
+    applySun(a, f, !!walkRef.current);
     drawHl();
     a.render();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -402,9 +432,18 @@ export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onE
   useEffect(() => {
     const a = api.current;
     if (!a) return;
-    applySun(a, full);
+    applySun(a, full, !!walkRef.current);
     a.render();
   }, [full.env.sun]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("kte_q", hq ? "high" : "low");
+    } catch {
+      /* yok say */
+    }
+    api.current?.render();
+  }, [hq]);
 
   useEffect(() => {
     drawHl();
@@ -425,12 +464,15 @@ export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onE
       a.camera.rotation.set(0, ws.current.yaw, 0);
       a.camera.fov = 70;
       a.camera.updateProjectionMatrix();
+      const fl = fullRef.current.floors[walk.floor];
+      a.lamp.position.set(walk.x, (bases[walk.floor] ?? 0) + (fl?.height ?? 2.8) - 0.4, walk.y);
     } else {
       a.controls.enabled = true;
       a.camera.fov = 45;
       held.current.clear();
       if (a.root) frame(a, a.root.children[1] as THREE.Group, "corner");
     }
+    applySun(a, fullRef.current, !!walk);
     a.render();
   }, [walk]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -478,7 +520,7 @@ export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onE
         {walk ? (
           <>
             <button className="exit" onClick={onExit}>⬅ Dışarı çık</button>
-            <button onClick={snapshot}>📷 Resim indir</button>
+            <button onClick={snapshot}>📷<span className="lg"> Resim indir</span></button>
           </>
         ) : (
           <>
@@ -486,9 +528,12 @@ export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onE
             <button onClick={() => go("front")}>Ön</button>
             <button onClick={() => go("side")}>Yan</button>
             <button onClick={() => go("top")}>Üst</button>
-            <button onClick={snapshot}>📷 Resim indir</button>
+            <button onClick={snapshot}>📷<span className="lg"> Resim indir</span></button>
           </>
         )}
+        <button className={"hq" + (hq ? " on" : "")} onClick={() => setHq((v) => !v)} title="Gerçekçi gölgelendirme (yavaş cihazda kapat)">
+          {hq ? <>✨<span className="lg"> Yüksek kalite</span></> : <>⚡<span className="lg"> Hızlı</span></>}
+        </button>
       </div>
       <div className="compass" aria-label="Kuzey yönü">
         <div ref={compass} className="needle">
@@ -533,31 +578,11 @@ function blocked(fl: FullData["floors"][number] | undefined, x: number, y: numbe
   return false;
 }
 
-function applySun(a: Api, f: FullData) {
-  const sun = f.env.sun;
-  const d = sunDir(sun);
-  const day = d.alt > 1;
-  const b = a.bounds;
-  const c = b.getCenter(new THREE.Vector3());
-  const R = Math.max(8, b.getSize(new THREE.Vector3()).length() / 2);
-  const up = Math.max(0.12, d.y);
-  a.sun.position.set(c.x + d.x * R * 3, Math.max(2, c.y + up * R * 3), c.z + d.z * R * 3);
-  a.sun.target.position.copy(c);
-  const sc = a.sun.shadow.camera;
-  sc.left = sc.bottom = -R * 1.5;
-  sc.right = sc.top = R * 1.5;
-  sc.near = 0.5;
-  sc.far = R * 9;
-  sc.updateProjectionMatrix();
-  const k = Math.max(0, Math.min(1, d.alt / 25));
-  a.sun.intensity = day ? 0.6 + 2.2 * k : 0;
-  a.sun.color.set(new THREE.Color("#ff9a4d").lerp(new THREE.Color("#fff4e0"), k));
-  a.sun.castShadow = sun.shadows && day;
-  a.hemi.intensity = day ? 0.7 + 1.0 * k : 0.35;
-  const sky = new THREE.Color("#1b2436").lerp(new THREE.Color("#f0a46b"), Math.max(0, Math.min(1, (d.alt + 6) / 12))).lerp(new THREE.Color("#dbe8f3"), Math.max(0, Math.min(1, (d.alt - 4) / 20)));
-  (a.scene.background as THREE.Color).copy(sky);
-  (a.scene.fog as THREE.Fog).color.copy(sky);
-  setSky(a.scene, sky);
+function applySun(a: Api, f: FullData, inside = false) {
+  applyLookSun(a.look, f.env.sun, a.bounds);
+  if (a.root) setNight(a.root, inside ? 0 : a.look.night);
+  a.lamp.intensity = inside ? 5 + 14 * a.look.night : 0;
+  a.renderer.toneMappingExposure = inside ? 1.12 : 0.9;
 }
 
 function frame(a: { camera: THREE.PerspectiveCamera; controls: OrbitControls }, house: THREE.Object3D, p: Preset) {
@@ -567,7 +592,7 @@ function frame(a: { camera: THREE.PerspectiveCamera; controls: OrbitControls }, 
   const size = box.getSize(new THREE.Vector3());
   const r = Math.max(3, size.length() / 2);
   const fov = (a.camera.fov * Math.PI) / 180;
-  const fit = (r / Math.sin(fov / 2) / Math.min(1, Math.max(0.55, a.camera.aspect))) * (a.camera.aspect < 1 ? 1.12 : 0.95);
+  const fit = (r / Math.sin(fov / 2) / Math.min(1, Math.max(0.55, a.camera.aspect))) * (a.camera.aspect < 1 ? 1.0 : 0.95);
   const dir =
     p === "keep"
       ? a.camera.position.clone().sub(a.controls.target)
@@ -577,7 +602,7 @@ function frame(a: { camera: THREE.PerspectiveCamera; controls: OrbitControls }, 
           ? new THREE.Vector3(1, 0.25, 0)
           : p === "top"
             ? new THREE.Vector3(0, 1, 0.02)
-            : new THREE.Vector3(0.9, 0.7, 1);
+            : new THREE.Vector3(0.9, 0.52, 1);
   dir.normalize();
   a.controls.target.copy(c);
   a.camera.position.copy(c).addScaledVector(dir, fit);
