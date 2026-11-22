@@ -127,3 +127,19 @@ input[type=color] { height: 30px; width: 56px; padding: 2px; cursor: pointer; bo
 .rng input { width: 100%; }
 .pk { border: 2px solid #ff8a1f; border-radius: 10px; padding: 8px 10px; background: #fff7ee; display: flex; flex-direction: column; gap: 6px; }
 .pk h4 { margin: 0; color: #8a4b0b; }
+
+.floors .v3btn.rep { margin-left: 0; background: #3f6b2a; border-color: #3f6b2a; }
+.rpt { position: fixed; inset: 0; z-index: 50; background: var(--bg); display: flex; flex-direction: column; }
+.rbar { display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: #f0ead8; border-bottom: 1px solid var(--line); }
+.rbar b { flex: 1; font-size: 18px; }
+.rbar button { padding: 10px 14px; border-radius: 10px; border: 1px solid var(--line); background: #fff; font-size: 15px; }
+.rbar .rpdf { background: #3f6b2a; border-color: #3f6b2a; color: #fff; font-weight: 600; }
+.rbody { flex: 1; overflow: auto; padding: 12px; max-width: 760px; width: 100%; margin: 0 auto; }
+.rsec { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; margin-bottom: 12px; }
+.rsec h3 { margin: 4px 0 6px; font-size: 16px; color: #3f6b2a; }
+.rtab { width: 100%; border-collapse: collapse; }
+.rtab td { padding: 7px 0; border-top: 1px solid #eee7d3; vertical-align: top; font-size: 15px; }
+.rtab tr:first-child td { border-top: 0; }
+.rtab .rq { text-align: right; white-space: nowrap; font-weight: 600; padding-left: 10px; }
+.rnote { font-size: 12.5px; color: #7a7466; font-weight: 400; }
+.rerr { color: #b3402a; }

@@ -134,7 +134,7 @@ function outsideMask(r: NonNullable<ReturnType<typeof rasterize>>) {
   return out;
 }
 
-function outsideFn(fl: Floor) {
+export function outsideFn(fl: Floor) {
   const r = rasterize(fl.walls);
   if (!r) return () => true;
   const out = outsideMask(r);

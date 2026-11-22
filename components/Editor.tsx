@@ -16,6 +16,7 @@ import type { Finish, EnvKind, EnvObj } from "@/lib/types";
 import { ENV_KINDS, MONTHS, compassName, drawEnv, newEnv, sunPos } from "@/lib/env";
 import type { Pick3, Walk } from "./View3D";
 
+const Report = dynamic(() => import("./Report"), { ssr: false });
 const View3D = dynamic(() => import("./View3D"), { ssr: false, loading: () => <div className="v3 v3load">3D hazırlanıyor…</div> });
 
 type View = { s: number; ox: number; oy: number };
@@ -72,6 +73,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
   const [playing, setPlaying] = useState(false);
   const [walkRoom, setWalkRoom] = useState("center");
   const [is3d, setIs3d] = useState(false);
+  const [showRep, setShowRep] = useState(false);
   const is3dRef = useRef(is3d);
   is3dRef.current = is3d;
   const [v3, setV3] = useState<V3>({ floors: "all", roof: true, items: true, cut: false });
@@ -1562,6 +1564,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
         <button className={"v3btn" + (is3d ? " on" : "")} onClick={() => { setIs3d((v) => !v); setSel(null); setChain(null); setWalk(null); setPick3(null); setPlaying(false); }}>
           {is3d ? "◧ 2D plana dön" : "🧊 3D görünüm"}
         </button>
+        <button className="v3btn rep" onClick={() => setShowRep(true)}>📋 Rapor</button>
       </div>
       {!is3d && (<>
       <div className="tools modes">
@@ -1592,6 +1595,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
       </div>
       </>)}
 
+      {showRep && <Report full={full} name={name} onClose={() => setShowRep(false)} />}
       <div className="stage">
         {is3d && <View3D full={full} fi={fi} v3={v3eff} name={name} walk={walk} pan={pan3} sel={pick3} onPick={setPick3} onExit={() => setWalk(null)} />}
         <div className="cv" ref={wrap} style={is3d ? { display: "none" } : undefined}>
