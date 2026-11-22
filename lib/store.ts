@@ -2,15 +2,9 @@ import { put, list, get, del } from "@vercel/blob";
 import fs from "fs/promises";
 import path from "path";
 
-export type Pt = { x: number; y: number };
-export type Plot = { points: Pt[]; closed: boolean };
-export type Project = {
-  id: string;
-  name: string;
-  createdAt: number;
-  updatedAt: number;
-  data: { plot: Plot; snap: number };
-};
+import { defaultData } from "./types";
+import type { Project } from "./types";
+export type { Pt, Plot, Project } from "./types";
 
 const useBlob = !!process.env.BLOB_READ_WRITE_TOKEN;
 const DIR = path.join(process.cwd(), ".data", "projects");
@@ -79,6 +73,6 @@ export function newProject(name: string): Project {
     name: name.trim().slice(0, 80) || "Yeni ev",
     createdAt: now,
     updatedAt: now,
-    data: { plot: { points: [], closed: false }, snap: 0.1 },
+    data: defaultData(),
   };
 }

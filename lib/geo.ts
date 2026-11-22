@@ -49,3 +49,13 @@ export function bounds(pts: Pt[]) {
 }
 
 export const fmt = (v: number, d = 2) => v.toFixed(d).replace(".", ",");
+
+export function segProject(p: Pt, a: Pt, b: Pt) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const L2 = dx * dx + dy * dy;
+  let t = L2 ? ((p.x - a.x) * dx + (p.y - a.y) * dy) / L2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  const q = { x: a.x + dx * t, y: a.y + dy * t };
+  return { t, q, d: Math.hypot(p.x - q.x, p.y - q.y), L: Math.sqrt(L2) };
+}

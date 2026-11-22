@@ -48,6 +48,11 @@ input, select { border: 1px solid var(--line); border-radius: 8px; padding: 8px 
 .snap { display: flex; align-items: center; gap: 6px; font-size: 14px; }
 .snap select { padding: 5px 6px; }
 .onlym { display: none; }
+.modes { gap: 6px; }
+.modes button.on { background: var(--green); border-color: var(--green); color: #fff; }
+.modes button { flex: 1; }
+.floatbtn { position: absolute; right: 10px; top: 10px; background: #d9822b; color: #fff; border-color: #d9822b; }
+.floatbtn:hover:not(:disabled) { background: #c2731f !important; }
 .stage { flex: 1; min-height: 0; display: flex; }
 .cv { flex: 1; position: relative; min-width: 0; min-height: 0; overflow: hidden; }
 .cv canvas { position: absolute; inset: 0; touch-action: none; cursor: crosshair; display: block; }
@@ -67,7 +72,9 @@ input, select { border: 1px solid var(--line); border-radius: 8px; padding: 8px 
   .onlym { display: inline-block; }
   .bar .ver { display: none; }
   .bar { padding: 6px 8px; }
-  .tools { padding: 5px 8px; gap: 5px; }
+  .tools { padding: 5px 8px; gap: 5px; overflow-x: auto; flex-wrap: nowrap; }
+  .tools > * { flex-shrink: 0; }
+  .modes button { flex: 1 0 auto; }
   .tools button { padding: 5px 8px; font-size: 13px; }
   .snap .lbl { display: none; }
   .hint { font-size: 12px; padding: 5px 8px; }
