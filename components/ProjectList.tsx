@@ -1,9 +1,12 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { VERSION } from "./App";
 import { HouseLogo } from "./HouseArt";
+import { TEMPLATES } from "@/lib/templates";
+import { downloadBackup, parseBackup, stamp } from "@/lib/backup";
 
 type Item = { id: string; name: string; updatedAt: number; thumb?: string };
+type Trash = { id: string; name: string; deletedAt: number; thumb?: string };
 
 function ago(t: number) {
   const d = (Date.now() - t) / 1000;
@@ -19,6 +22,17 @@ export default function ProjectList({ onOpen, onLogout }: { onOpen: (id: string)
   const [name, setName] = useState("");
   const [confirmDel, setConfirmDel] = useState<string | null>(null);
   const [err, setErr] = useState("");
+  const [tpl, setTpl] = useState("empty");
+  const [busy, setBusy] = useState("");
+  const [note, setNote] = useState("");
+  const [trash, setTrash] = useState<Trash[] | null>(null);
+  const [showTrash, setShowTrash] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  async function loadTrash() {
+    const r = await fetch("/api/trash");
+    if (r.ok) setTrash(await r.json());
+  }
 
   async function load() {
     const r = await fetch("/api/projects");
@@ -30,6 +44,7 @@ export default function ProjectList({ onOpen, onLogout }: { onOpen: (id: string)
   }
   useEffect(() => {
     load();
+    loadTrash();
     const on = () => load();
     window.addEventListener("kte-thumb", on);
     return () => window.removeEventListener("kte-thumb", on);
@@ -41,7 +56,7 @@ export default function ProjectList({ onOpen, onLogout }: { onOpen: (id: string)
     const r = await fetch("/api/projects", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
+      body: JSON.stringify({ name: name || (tpl !== "empty" ? TEMPLATES.find((t) => t.key === tpl)?.name : ""), data: TEMPLATES.find((t) => t.key === tpl)?.make() ?? undefined }),
     });
     if (!r.ok) return setErr("Proje oluşturulamadı.");
     const p = await r.json();
@@ -51,7 +66,52 @@ export default function ProjectList({ onOpen, onLogout }: { onOpen: (id: string)
   async function remove(id: string) {
     await fetch("/api/projects/" + id, { method: "DELETE" });
     setConfirmDel(null);
+    setNote("Ev çöp kutusuna taşındı. 30 gün içinde geri getirebilirsin.");
     load();
+    loadTrash();
+  }
+
+  async function restore(id: string) {
+    await fetch("/api/trash", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
+    setNote("✅ Ev geri getirildi.");
+    load();
+    loadTrash();
+  }
+
+  async function purge(id: string) {
+    await fetch("/api/trash?id=" + encodeURIComponent(id), { method: "DELETE" });
+    loadTrash();
+  }
+
+  async function exportAll() {
+    if (!items?.length) return;
+    setBusy("Yedek hazırlanıyor…");
+    try {
+      const all = await Promise.all(items.map((p) => fetch("/api/projects/" + p.id).then((r) => r.json())));
+      downloadBackup(all.map((p) => ({ name: p.name, createdAt: p.createdAt, data: p.data })), `koy-evi-tum-evler-${stamp()}.json`);
+      setNote(`✅ ${all.length} ev tek dosyaya yedeklendi.`);
+    } catch {
+      setErr("Yedek alınamadı.");
+    }
+    setBusy("");
+  }
+
+  async function importFile(f: File) {
+    setErr("");
+    setBusy("Yedek yükleniyor…");
+    try {
+      if (f.size > 8 * 1024 * 1024) throw new Error("Dosya çok büyük.");
+      const list = parseBackup(await f.text());
+      for (const p of list) {
+        const r = await fetch("/api/projects", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: p.name, data: p.data }) });
+        if (!r.ok) throw new Error("Kaydedilemedi.");
+      }
+      setNote(`✅ ${list.length} ev yedekten yüklendi.`);
+      load();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Yedek yüklenemedi.");
+    }
+    setBusy("");
   }
 
   return (
@@ -68,11 +128,29 @@ export default function ProjectList({ onOpen, onLogout }: { onOpen: (id: string)
       </header>
 
       <form className="newp" onSubmit={create}>
-        <input placeholder="Yeni ev adı (örn. Köy evi 1)" value={name} onChange={(e) => setName(e.target.value)} />
-        <button className="primary">+ Yeni ev</button>
+        <div className="newrow">
+          <input placeholder="Yeni ev adı (örn. Köy evi 1)" value={name} onChange={(e) => setName(e.target.value)} />
+          <button className="primary">+ Yeni ev</button>
+        </div>
+        <div className="tpls" role="radiogroup" aria-label="Başlangıç">
+          {TEMPLATES.map((t) => (
+            <button type="button" key={t.key} role="radio" aria-checked={tpl === t.key} className={"tpl" + (tpl === t.key ? " on" : "")} onClick={() => setTpl(t.key)}>
+              <b>{t.name}</b>
+              <span>{t.desc}</span>
+            </button>
+          ))}
+        </div>
       </form>
 
+      <div className="bkbar">
+        <button onClick={() => fileRef.current?.click()}>⬆ Yedekten yükle</button>
+        <button onClick={exportAll} disabled={!items?.length}>⬇ Tüm evleri yedekle</button>
+        <input ref={fileRef} type="file" accept=".json,application/json" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) importFile(f); }} />
+        {busy && <span className="muted">{busy}</span>}
+      </div>
+
       {err && <div className="err">{err}</div>}
+      {note && <div className="note" onClick={() => setNote("")}>{note}</div>}
       {items === null && <div className="muted">Yükleniyor…</div>}
       {items?.length === 0 && <div className="empty muted">Henüz ev projen yok. Yukarıdan bir ad yazıp “Yeni ev”e dokun; uygulama seni adım adım yönlendirecek.</div>}
 
@@ -97,7 +175,7 @@ export default function ProjectList({ onOpen, onLogout }: { onOpen: (id: string)
               </button>
               {confirmDel === p.id ? (
                 <div className="row">
-                  <button className="danger" onClick={() => remove(p.id)}>Evet, sil</button>
+                  <button className="danger" onClick={() => remove(p.id)}>Çöpe at</button>
                   <button onClick={() => setConfirmDel(null)}>Vazgeç</button>
                 </div>
               ) : (
@@ -107,6 +185,31 @@ export default function ProjectList({ onOpen, onLogout }: { onOpen: (id: string)
           </div>
         ))}
       </div>
+
+      {!!trash?.length && (
+        <div className="trash">
+          <button className="link" onClick={() => setShowTrash((v) => !v)}>
+            🗑 Çöp kutusu ({trash.length}) {showTrash ? "▴" : "▾"}
+          </button>
+          {showTrash && (
+            <>
+              <p className="muted small">Silinen evler 30 gün burada kalır, sonra kendiliğinden silinir.</p>
+              {trash.map((t) => (
+                <div className="trow" key={t.id}>
+                  <div>
+                    <b>{t.name}</b>
+                    <span className="muted small">{ago(t.deletedAt)} silindi</span>
+                  </div>
+                  <div className="row">
+                    <button onClick={() => restore(t.id)}>↺ Geri getir</button>
+                    <button className="ghost" onClick={() => purge(t.id)} title="Kalıcı sil">✕</button>
+                  </div>
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }

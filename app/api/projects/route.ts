@@ -12,8 +12,9 @@ export async function GET() {
 
 export async function POST(req: Request) {
   if (!(await isAuthed())) return NextResponse.json({ error: "yetkisiz" }, { status: 401 });
-  const { name } = (await req.json().catch(() => ({}))) as { name?: string };
-  const p = newProject(name || "");
+  const { name, data } = (await req.json().catch(() => ({}))) as { name?: string; data?: unknown };
+  // data: yedekten yükleme veya hazır şablon
+  const p = newProject(name || "", data && typeof data === "object" ? data : undefined);
   await saveProject(p);
   return NextResponse.json(p);
 }

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { isAuthed } from "@/lib/auth";
-import { deleteProject, getProject, saveProject } from "@/lib/store";
+import { deleteProject, getProject, maybeSnapshot, saveProject } from "@/lib/store";
 
 type Ctx = { params: Promise<{ id: string }> };
 const no = () => NextResponse.json({ error: "yetkisiz" }, { status: 401 });
@@ -19,8 +19,11 @@ export async function PUT(req: Request, { params }: Ctx) {
   if (!cur) return NextResponse.json({ error: "bulunamadı" }, { status: 404 });
   const body = (await req.json().catch(() => null)) as Partial<typeof cur> | null;
   if (!body) return NextResponse.json({ error: "hatalı veri" }, { status: 400 });
+  // değişiklikten önceki hâli belli aralıklarla sürüm olarak sakla
+  const lastSnap = body.data ? await maybeSnapshot(cur).catch(() => cur.lastSnap) : cur.lastSnap;
   const next = {
     ...cur,
+    lastSnap,
     name: typeof body.name === "string" ? body.name.trim().slice(0, 80) || cur.name : cur.name,
     data: body.data ?? cur.data,
     thumb: typeof body.thumb === "string" && body.thumb.startsWith("data:image/") && body.thumb.length < 300000 ? body.thumb : cur.thumb,

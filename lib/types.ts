@@ -84,7 +84,7 @@ export type PlanData = {
   custom: CatItem[];
 };
 
-export type Project = { id: string; name: string; createdAt: number; updatedAt: number; data: FullData; thumb?: string };
+export type Project = { id: string; name: string; createdAt: number; updatedAt: number; data: FullData; thumb?: string; lastSnap?: number; deletedAt?: number };
 
 export const uid = () => Math.random().toString(36).slice(2, 10);
 

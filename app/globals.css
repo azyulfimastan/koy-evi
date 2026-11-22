@@ -228,3 +228,33 @@ button.ghost { border-color: transparent; background: transparent; font-size: 17
 .prow button { background: #2c3038; color: #eee; border-color: #3a3f49; }
 .prow button.primary { background: #3f6b2a; border-color: #3f6b2a; color: #fff; font-weight: 600; }
 .pctl .muted { color: #9aa0a8; margin-top: 0; }
+
+/* ---------- v1.2: şablon, yedek, çöp kutusu, geçmiş ---------- */
+.newp { flex-direction: column; }
+.newrow { display: flex; gap: 8px; }
+.newrow input { flex: 1; border: 0; background: transparent; font-size: 16px; padding: 10px; min-width: 0; }
+.newrow input:focus { outline: none; }
+.tpls { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.tpl { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; padding: 9px 11px; border-radius: 11px; background: #faf7ef; }
+.tpl b { font-size: 14px; }
+.tpl span { font-size: 12px; color: var(--muted); }
+.tpl.on { border-color: #3f6b2a; background: #eaf3dd; box-shadow: 0 0 0 1px #3f6b2a inset; }
+.bkbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.bkbar button { font-size: 14px; }
+.note { background: #eaf3dd; border: 1px solid #c9dcb0; color: #2f5320; border-radius: 10px; padding: 9px 12px; font-size: 14px; }
+.trash { border-top: 1px solid var(--line); padding-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.trow, .hrow { display: flex; align-items: center; justify-content: space-between; gap: 8px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; }
+.trow > div:first-child, .hrow > div:first-child { display: flex; flex-direction: column; min-width: 0; }
+.small { font-size: 12.5px; }
+.bar .bak { padding: 7px 10px; }
+.modal { position: fixed; inset: 0; z-index: 55; background: rgba(30,28,22,.45); display: flex; align-items: center; justify-content: center; padding: 12px; }
+.mcard { background: var(--bg); border-radius: 16px; width: 100%; max-width: 520px; max-height: 90vh; overflow: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; box-shadow: 0 16px 50px rgba(0,0,0,.25); }
+.mhead { display: flex; align-items: center; justify-content: space-between; }
+.mhead b { font-size: 18px; }
+.mcard h4 { margin: 0 0 4px; font-size: 15px; color: #3f6b2a; }
+.mcard section { display: flex; flex-direction: column; gap: 6px; }
+.hist { display: flex; flex-direction: column; gap: 6px; }
+@media (max-width: 640px) {
+  .tpls { grid-template-columns: 1fr 1fr; }
+  .hrow, .trow { flex-wrap: wrap; }
+}
