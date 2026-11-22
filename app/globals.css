@@ -104,3 +104,11 @@ input, select { border: 1px solid var(--line); border-radius: 8px; padding: 8px 
 .floors .v3btn:hover:not(:disabled) { filter: brightness(1.08); }
 .chk { display: flex; align-items: center; gap: 8px; font-size: 14px; }
 .chk input { width: 18px; height: 18px; }
+.mat { display: flex; flex-direction: column; gap: 5px; padding: 8px 0; border-top: 1px solid var(--line); }
+.matt { display: flex; align-items: center; justify-content: space-between; font-size: 14px; }
+.mat select { padding: 5px 6px; }
+.sw { display: flex; flex-wrap: wrap; gap: 4px; }
+.sw button { width: 22px; height: 22px; padding: 0; border-radius: 6px; border: 1px solid #0003; }
+.sw button.on { outline: 2px solid var(--green); outline-offset: 1px; }
+input[type=color] { height: 30px; width: 56px; padding: 2px; cursor: pointer; border-radius: 8px; }
+.edge input[type=color] { width: 56px; padding: 2px; }

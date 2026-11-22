@@ -1,6 +1,6 @@
 export type Pt = { x: number; y: number };
 export type Plot = { points: Pt[]; closed: boolean };
-export type Wall = { id: string; a: Pt; b: Pt; t: number; color: string };
+export type Wall = { id: string; a: Pt; b: Pt; t: number; color: string; ext?: string; int?: string };
 export type Opening = {
   id: string;
   wall: string;
@@ -13,7 +13,7 @@ export type Opening = {
   flip: boolean; // kapı açılış tarafı
   hinge: boolean; // menteşe tarafı
 };
-export type Room = { id: string; name: string; seed: Pt; color: string };
+export type Room = { id: string; name: string; seed: Pt; color: string; floor?: string; floorColor?: string };
 export type Stair = {
   id: string;
   kind: "straight" | "L" | "U" | "spiral";
@@ -42,8 +42,20 @@ export type Roof = {
   overhang: number; // m
   ridge: "auto" | "x" | "y";
   color: string;
+  tex: string; // kaplama: tile | metal | shingle | plain
 };
-export type FullData = { plot: Plot; snap: number; defT: number; roof: Roof; floors: Floor[]; custom: CatItem[] };
+/** Tüm ev için malzeme ve renk ayarları (3B) */
+export type Finish = {
+  extColor: string;
+  extTex: string; // plain | brick | stone | wood
+  intColor: string;
+  intTex: string; // plain | wood
+  doorColor: string;
+  frameColor: string;
+  groundColor: string;
+};
+export const defaultFinish = (): Finish => ({ extColor: "#e9e1d3", extTex: "plain", intColor: "#f4f0e8", intTex: "plain", doorColor: "#8a5a36", frameColor: "#f7f7f4", groundColor: "#93b565" });
+export type FullData = { plot: Plot; snap: number; defT: number; roof: Roof; floors: Floor[]; custom: CatItem[]; fin: Finish };
 
 /** Editörün o an çalıştığı kat + ortak ayarlar (düz görünüm) */
 export type PlanData = {
@@ -51,6 +63,7 @@ export type PlanData = {
   snap: number;
   defT: number;
   roof: Roof;
+  fin: Finish;
   name: string;
   height: number;
   walls: Wall[];
@@ -65,11 +78,11 @@ export type Project = { id: string; name: string; createdAt: number; updatedAt: 
 
 export const uid = () => Math.random().toString(36).slice(2, 10);
 
-export const defaultRoof = (): Roof => ({ kind: "gable", pitch: 35, overhang: 0.4, ridge: "auto", color: "#a5523a" });
+export const defaultRoof = (): Roof => ({ kind: "gable", pitch: 35, overhang: 0.4, ridge: "auto", color: "#a5523a", tex: "tile" });
 export const newFloor = (name: string): Floor => ({ id: uid(), name, height: 2.8, walls: [], openings: [], rooms: [], stairs: [], items: [] });
 
 export function defaultFull(): FullData {
-  return { plot: { points: [], closed: false }, snap: 0.1, defT: 0.25, roof: defaultRoof(), floors: [newFloor("Zemin kat")], custom: [] };
+  return { plot: { points: [], closed: false }, snap: 0.1, defT: 0.25, roof: defaultRoof(), floors: [newFloor("Zemin kat")], custom: [], fin: defaultFinish() };
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -98,6 +111,7 @@ export function normalizeFull(d: any): FullData {
     roof: { ...defaultRoof(), ...(d.roof ?? {}) },
     floors,
     custom: Array.isArray(d.custom) ? d.custom : [],
+    fin: { ...defaultFinish(), ...(d.fin ?? {}) },
   };
 }
 
@@ -108,6 +122,7 @@ export function flatten(f: FullData, i: number): PlanData {
     snap: f.snap,
     defT: f.defT,
     roof: f.roof,
+    fin: f.fin,
     name: fl.name,
     height: fl.height,
     walls: fl.walls,
@@ -123,5 +138,5 @@ export function unflatten(f: FullData, i: number, d: PlanData): FullData {
   const floors = f.floors.map((fl, k) =>
     k === i ? { ...fl, name: d.name, height: d.height, walls: d.walls, openings: d.openings, rooms: d.rooms, stairs: d.stairs, items: d.items } : fl
   );
-  return { plot: d.plot, snap: d.snap, defT: d.defT, roof: d.roof, floors, custom: d.custom };
+  return { plot: d.plot, snap: d.snap, defT: d.defT, roof: d.roof, floors, custom: d.custom, fin: d.fin };
 }

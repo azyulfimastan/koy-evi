@@ -11,6 +11,8 @@ import type { Region } from "@/lib/rooms";
 import { VERSION } from "./App";
 import dynamic from "next/dynamic";
 import { totalHeight, type V3 } from "@/lib/scene3d";
+import { EXT_TEX, FLOOR_DEFAULT, FLOOR_TEX, INT_TEX, ROOF_TEX, SWATCHES } from "@/lib/textures";
+import type { Finish } from "@/lib/types";
 
 const View3D = dynamic(() => import("./View3D"), { ssr: false, loading: () => <div className="v3 v3load">3D hazırlanıyor…</div> });
 
@@ -693,6 +695,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
         label(g, "⚠ " + r.name + " (açık)", q.x, q.y, "#b3392b", isSel);
         continue;
       }
+      if (sel?.k === "wall") continue; // seçili duvarın ölçü etiketiyle çakışmasın
       const q = S({ x: reg.cx, y: reg.cy });
       label(g, r.name, q.x, q.y - 9, isSel ? "#8a4b0b" : "#2a2a24", true);
       label(g, fmt(reg.area) + " m²", q.x, q.y + 9, isSel ? "#8a4b0b" : "#4a4638", false);
@@ -1314,6 +1317,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
     const copy = f.floors[i - 1].walls.map((w) => ({ ...w, id: uid(), a: { ...w.a }, b: { ...w.b } }));
     setFull({ ...f, floors: f.floors.map((fl, k) => (k === i ? { ...fl, walls: [...fl.walls, ...copy] } : fl)) });
   }
+  const setFin = (p: Partial<Finish>) => apply({ ...dataRef.current, fin: { ...dataRef.current.fin, ...p } });
   const patchRoom = (id: string, f: (r: Room) => Room) => apply({ ...dataRef.current, rooms: dataRef.current.rooms.map((r) => (r.id === id ? f(r) : r)) });
 
   useEffect(() => {
@@ -1472,6 +1476,20 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
                   <div><span>Kat sayısı</span><b>{full.floors.length}</b></div>
                   <div><span>Toplam yükseklik</span><b>{fmt(totalHeight(full), 2)} m</b></div>
                 </div>
+                <h4>Malzeme ve renkler</h4>
+                <MatRow label="Dış duvar" color={full.fin.extColor} tex={full.fin.extTex} opts={EXT_TEX}
+                  onColor={(c) => setFin({ extColor: c })} onTex={(t) => setFin({ extTex: t })} />
+                <MatRow label="İç duvar" color={full.fin.intColor} tex={full.fin.intTex} opts={INT_TEX}
+                  onColor={(c) => setFin({ intColor: c })} onTex={(t) => setFin({ intTex: t })} />
+                <MatRow label="Çatı" color={full.roof.color} tex={full.roof.tex} opts={ROOF_TEX}
+                  onColor={(c) => apply({ ...dataRef.current, roof: { ...dataRef.current.roof, color: c } })}
+                  onTex={(t) => apply({ ...dataRef.current, roof: { ...dataRef.current.roof, tex: t } })} />
+                <MatRow label="Kapılar" color={full.fin.doorColor} onColor={(c) => setFin({ doorColor: c })} />
+                <MatRow label="Pencere çerçevesi" color={full.fin.frameColor} onColor={(c) => setFin({ frameColor: c })} />
+                <MatRow label="Bahçe zemini" color={full.fin.groundColor} onColor={(c) => setFin({ groundColor: c })} />
+                <div className="muted small">
+                  Tek duvarın iç/dış rengini ve odanın zemin kaplamasını 2D planda o duvara / odaya dokunarak değiştir.
+                </div>
                 <div className="muted small">
                   Döndür: sürükle (tek parmak). Yakınlaştır: tekerlek / iki parmak. Kaydır: sağ tık veya iki parmakla sürükle.
                   Kat seçmek için üstteki kat düğmelerini kullan.
@@ -1550,9 +1568,21 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
                   onCommit={(v) => patchWall(selWall.id, (w) => ({ ...w, t: round3(Math.max(0.05, Math.min(1.5, v / 100))) }))}
                 />
                 <label className="edge">
-                  <span>Renk</span>
+                  <span>Plan rengi (2D)</span>
                   <input type="color" value={selWall.color} onChange={(e) => patchWall(selWall.id, (w) => ({ ...w, color: e.target.value }))} />
                 </label>
+                <h4>Boya / kaplama rengi (3D)</h4>
+                <label className="edge">
+                  <span>Dış yüz</span>
+                  <input type="color" value={selWall.ext ?? full.fin.extColor} onChange={(e) => patchWall(selWall.id, (w) => ({ ...w, ext: e.target.value }))} />
+                </label>
+                <label className="edge">
+                  <span>İç yüz</span>
+                  <input type="color" value={selWall.int ?? full.fin.intColor} onChange={(e) => patchWall(selWall.id, (w) => ({ ...w, int: e.target.value }))} />
+                </label>
+                {(selWall.ext || selWall.int) && (
+                  <button onClick={() => patchWall(selWall.id, (w) => ({ ...w, ext: undefined, int: undefined }))}>Genel renge dön</button>
+                )}
                 <div className="muted small">Uçlardaki turuncu noktaları sürükleyerek uzat, duvarın gövdesini sürükleyerek taşı.</div>
                 <button className="danger" onClick={deleteSel}>Duvarı sil</button>
               </>
@@ -1611,6 +1641,18 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
                   <span>Zemin rengi</span>
                   <input type="color" value={selRoom.color} onChange={(e) => patchRoom(selRoom.id, (r) => ({ ...r, color: e.target.value }))} />
                 </label>
+                <label className="edge">
+                  <span>Zemin kaplaması (3D)</span>
+                  <select value={selRoom.floor ?? "none"} onChange={(e) => patchRoom(selRoom.id, (r) => ({ ...r, floor: e.target.value === "none" ? undefined : e.target.value, floorColor: undefined }))}>
+                    {FLOOR_TEX.map(([k, l]) => (<option key={k} value={k}>{l}</option>))}
+                  </select>
+                </label>
+                {selRoom.floor && selRoom.floor !== "none" && (
+                  <label className="edge">
+                    <span>Kaplama rengi</span>
+                    <input type="color" value={selRoom.floorColor ?? FLOOR_DEFAULT[selRoom.floor] ?? "#cccccc"} onChange={(e) => patchRoom(selRoom.id, (r) => ({ ...r, floorColor: e.target.value }))} />
+                  </label>
+                )}
                 {(() => {
                   const reg = regions.get(selRoom.id);
                   return reg && !reg.open ? (
@@ -1751,6 +1793,12 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
                   </label>
                 )}
                 <label className="edge">
+                  <span>Kaplama (3D)</span>
+                  <select value={full.roof.tex} onChange={(e) => apply({ ...data, roof: { ...full.roof, tex: e.target.value } })}>
+                    {ROOF_TEX.map(([k, l]) => (<option key={k} value={k}>{l}</option>))}
+                  </select>
+                </label>
+                <label className="edge">
                   <span>Renk</span>
                   <input type="color" value={full.roof.color} onChange={(e) => apply({ ...data, roof: { ...full.roof, color: e.target.value } })} />
                 </label>
@@ -1800,6 +1848,27 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
             <div className="ver pushb">Köy Evi Tasarım {VERSION}</div>
           </aside>
         )}
+      </div>
+    </div>
+  );
+}
+
+function MatRow({ label, color, tex, opts, onColor, onTex }: { label: string; color: string; tex?: string; opts?: [string, string][]; onColor: (c: string) => void; onTex?: (t: string) => void }) {
+  return (
+    <div className="mat">
+      <div className="matt">
+        <span>{label}</span>
+        <input type="color" value={color} onChange={(e) => onColor(e.target.value)} aria-label={label + " rengi"} />
+      </div>
+      {opts && onTex && (
+        <select value={tex} onChange={(e) => onTex(e.target.value)} aria-label={label + " kaplaması"}>
+          {opts.map(([k, l]) => (<option key={k} value={k}>{l}</option>))}
+        </select>
+      )}
+      <div className="sw">
+        {SWATCHES.map((c) => (
+          <button key={c} style={{ background: c }} className={c.toLowerCase() === color.toLowerCase() ? "on" : ""} onClick={() => onColor(c)} aria-label={c} />
+        ))}
       </div>
     </div>
   );
