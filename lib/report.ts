@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import type { FullData } from "./types";
 import { computeReport, type Line } from "./quantities";
-import { buildHouse, disposeTree } from "./scene3d";
+import { buildHouse, decorateScene, setSky, disposeTree } from "./scene3d";
 import { sunDir } from "./env";
 import { rasterize, regionAt, wallGeom, endJoins } from "./rooms";
 import { drawItem } from "./furniture";
@@ -16,7 +16,7 @@ const MUTE = "#7a7466";
 const FONT = "system-ui, 'Segoe UI', Roboto, Arial, sans-serif";
 
 /** Ev için 3B resim (ekran dışı) */
-export function render3d(f: FullData, dir: [number, number, number], w = 1100, h = 700): HTMLCanvasElement {
+export function render3d(f: FullData, dir: [number, number, number], w = 1100, h = 700, ortho = false): HTMLCanvasElement {
   const canvas = document.createElement("canvas");
   canvas.width = w;
   canvas.height = h;
@@ -28,6 +28,8 @@ export function render3d(f: FullData, dir: [number, number, number], w = 1100, h
   const sky = new THREE.Color("#dbe8f3");
   scene.background = sky;
   scene.fog = new THREE.Fog("#dbe8f3", 90, 300);
+  decorateScene(scene, renderer);
+  setSky(scene, sky);
   scene.add(new THREE.HemisphereLight("#f2f6ff", "#a89a7c", 1.7));
   const sun = new THREE.DirectionalLight("#fff4e0", 2.6);
   sun.castShadow = f.env.sun.shadows;
@@ -64,14 +66,34 @@ export function render3d(f: FullData, dir: [number, number, number], w = 1100, h
   sc.near = 0.5;
   sc.far = R * 9;
   sc.updateProjectionMatrix();
-  const cam = new THREE.PerspectiveCamera(45, w / h, 0.1, 1000);
-  const fov = (cam.fov * Math.PI) / 180;
-  const fit = (R / Math.sin(fov / 2) / Math.min(1, cam.aspect)) * 0.95;
   const v = new THREE.Vector3(...dir).normalize();
-  cam.position.copy(c).addScaledVector(v, fit);
-  cam.near = Math.max(0.05, fit / 200);
-  cam.lookAt(c);
-  cam.updateProjectionMatrix();
+  let cam: THREE.Camera;
+  if (ortho) {
+    const oc = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 2000);
+    oc.position.copy(c).addScaledVector(v, R * 4);
+    oc.lookAt(c);
+    oc.updateMatrixWorld(true);
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    for (const px of [box.min.x, box.max.x]) for (const py of [box.min.y, box.max.y]) for (const pz of [box.min.z, box.max.z]) {
+      const q = new THREE.Vector3(px, py, pz).applyMatrix4(oc.matrixWorldInverse);
+      x0 = Math.min(x0, q.x); x1 = Math.max(x1, q.x); y0 = Math.min(y0, q.y); y1 = Math.max(y1, q.y);
+    }
+    const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+    let hw = ((x1 - x0) / 2) * 1.12, hh = ((y1 - y0) / 2) * 1.12;
+    if (hw / hh < w / h) hw = hh * (w / h); else hh = hw / (w / h);
+    oc.left = cx - hw; oc.right = cx + hw; oc.top = cy + hh; oc.bottom = cy - hh;
+    oc.updateProjectionMatrix();
+    cam = oc;
+  } else {
+    const pc = new THREE.PerspectiveCamera(45, w / h, 0.1, 1000);
+    const fov = (pc.fov * Math.PI) / 180;
+    const fit = (R / Math.sin(fov / 2) / Math.min(1, pc.aspect)) * 0.95;
+    pc.position.copy(c).addScaledVector(v, fit);
+    pc.near = Math.max(0.05, fit / 200);
+    pc.lookAt(c);
+    pc.updateProjectionMatrix();
+    cam = pc;
+  }
   renderer.render(scene, cam);
   // sonucu kalıcı 2D tuvale kopyala, GL'yi bırak
   const out = document.createElement("canvas");
@@ -181,6 +203,40 @@ export function renderPlan(f: FullData, fi: number, w = 1080, h = 1000): HTMLCan
   }
   for (const st of fl.stairs) drawStair(g, st, fl.height, s, ox, oy, { color: "#6d6155", fill: "#e8dcc4", lw: 1.5 });
   for (const it of fl.items) drawItem(g, it, s, ox, oy, { label: false });
+  // duvar ölçüleri
+  {
+    const wp: { x: number; y: number }[] = [];
+    fl.walls.forEach((q) => wp.push(q.a, q.b));
+    if (wp.length) {
+      const mcx = wp.reduce((a, p) => a + p.x, 0) / wp.length;
+      const mcy = wp.reduce((a, p) => a + p.y, 0) / wp.length;
+      g.font = `600 17px ${FONT}`;
+      g.textAlign = "center";
+      for (const wl of fl.walls) {
+        const L = Math.hypot(wl.b.x - wl.a.x, wl.b.y - wl.a.y);
+        if (L < 0.8) continue;
+        const ux = (wl.b.x - wl.a.x) / L;
+        const uy = (wl.b.y - wl.a.y) / L;
+        let nx = -uy;
+        let ny = ux;
+        const mx = (wl.a.x + wl.b.x) / 2;
+        const my = (wl.a.y + wl.b.y) / 2;
+        if ((mx - mcx) * nx + (my - mcy) * ny < 0) {
+          nx = -nx;
+          ny = -ny;
+        }
+        const off = wl.t / 2 + 26 / s;
+        const tx = X(mx + nx * off);
+        const ty = Y(my + ny * off);
+        const t = fmt(L, 2) + " m";
+        const tw = g.measureText(t).width + 10;
+        g.fillStyle = "rgba(255,253,247,0.92)";
+        g.fillRect(tx - tw / 2, ty - 13, tw, 24);
+        g.fillStyle = "#2f5f8a";
+        g.fillText(t, tx, ty + 5);
+      }
+    }
+  }
   // etiketler
   g.textAlign = "center";
   for (const l of labels) {
@@ -265,6 +321,17 @@ class Page {
     this.g.drawImage(src, M + (w - dw) / 2, this.y, dw, dh);
     this.y += dh + 16;
   }
+  imgAt(src: HTMLCanvasElement, x: number, y: number, w: number, label: string) {
+    const h = (src.height / src.width) * w;
+    this.g.drawImage(src, x, y, w, h);
+    this.g.strokeStyle = "#ddd6c2";
+    this.g.lineWidth = 2;
+    this.g.strokeRect(x, y, w, h);
+    this.g.fillStyle = INK;
+    this.g.font = `600 22px ${FONT}`;
+    this.g.fillText(label, x + 6, y + h + 28);
+    return h;
+  }
   row(cols: [string, number, ("l" | "r")?][], bold = false, shade = false) {
     const g = this.g;
     if (shade) {
@@ -338,6 +405,31 @@ export function buildPages(f: FullData, title: string): HTMLCanvasElement[] {
     }
   });
 
+  if (f.floors.some((q) => q.walls.length)) {
+    p = np("Cepheler");
+    p.h1("Cepheler");
+    p.text("Dört yönden düz (ortografik) görünüm. Ölçekli değildir, yalnızca biçimi göstermek içindir.", MUTE, 20);
+    p.y += 10;
+    const cw = (PW - 2 * M - 24) / 2;
+    const views: [string, [number, number, number]][] = [["Ön cephe", [0, 0.03, 1]], ["Arka cephe", [0, 0.03, -1]], ["Sağ cephe", [1, 0.03, 0]], ["Sol cephe", [-1, 0.03, 0]]];
+    let col = 0;
+    let rowH = 0;
+    for (const [lab, dir] of views) {
+      try {
+        const im = render3d(f, dir, 900, 620, true);
+        const hh = p.imgAt(im, M + col * (cw + 24), p.y, cw, lab);
+        rowH = Math.max(rowH, hh);
+      } catch {
+        /* yok say */
+      }
+      if (col === 1) {
+        p.y += rowH + 50;
+        rowH = 0;
+      }
+      col = 1 - col;
+    }
+  }
+
   p = np("Oda alanları ve malzeme");
   p.h1("Oda alanları");
   if (!rep.rooms.length) p.text("Kapalı oda yok.", MUTE);
@@ -361,8 +453,10 @@ export function buildPages(f: FullData, title: string): HTMLCanvasElement[] {
     }
   };
   table("Malzeme miktarı (yaklaşık)", rep.lines, true);
+  table("Kaba yapı ve tesisat (tahmini)", rep.rough, true);
   table("Kapı ve pencereler", rep.openings, false);
   table("Eşya listesi", rep.items, false);
+  if (p.left < 110) p = np("Notlar");
   p.y += 20;
   p.text("Miktarlar plandan otomatik hesaplanır, yaklaşıktır; satın almadan önce usta/mimarla doğrulayın.", MUTE, 20);
   p.text(`Fire payı %${rep.waste * 100} olarak eklenmiştir.`, MUTE, 20);

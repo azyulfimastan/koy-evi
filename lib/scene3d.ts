@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import type { EnvObj, FullData, Finish, Floor, Item, Opening, Stair } from "./types";
 import { FLOOR_DEFAULT, TEX_SIZE, getTex } from "./textures";
@@ -102,7 +103,7 @@ function openingShape(a: number, b: number, bottom: number, top: number, shape: 
 }
 
 /** Dışarıdan erişilebilen hücreler (bina dışı) */
-function outsideMask(r: NonNullable<ReturnType<typeof rasterize>>) {
+export function outsideMask(r: NonNullable<ReturnType<typeof rasterize>>) {
   const { w: W, h: H, blocked } = r;
   const out = new Uint8Array(W * H);
   const q = new Int32Array(W * H);
@@ -832,6 +833,10 @@ function buildRoof(f: FullData, base: number, m: Mats, g: THREE.Group) {
 }
 
 /* ---------------- arsa ---------------- */
+function grassMat(color: string) {
+  return new THREE.MeshStandardMaterial({ color, roughness: 1, map: getTex("grass")! });
+}
+
 function buildGround(f: FullData, g: THREE.Group) {
   const gc = f.fin.groundColor;
   const pts = f.plot.points;
@@ -840,7 +845,16 @@ function buildGround(f: FullData, g: THREE.Group) {
     const geo = new THREE.ShapeGeometry(s);
     geo.rotateX(-Math.PI / 2);
     geo.translate(0, -0.01, 0);
-    const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: gc, roughness: 1 }));
+    // dünya UV: 1 doku = 4 m
+    const pos = geo.attributes.position;
+    const uv = new Float32Array(pos.count * 2);
+    for (let i = 0; i < pos.count; i++) {
+      uv[i * 2] = pos.getX(i) / 4;
+      uv[i * 2 + 1] = pos.getZ(i) / 4;
+    }
+    geo.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+    const m = grassMat(gc);
+    const mesh = new THREE.Mesh(geo, m);
     mesh.receiveShadow = true;
     g.add(mesh);
     const line = new THREE.LineLoop(
@@ -850,11 +864,68 @@ function buildGround(f: FullData, g: THREE.Group) {
     line.computeLineDistances();
     g.add(line);
   }
-  const big = new THREE.Mesh(new THREE.PlaneGeometry(600, 600), new THREE.MeshStandardMaterial({ color: "#b9c4a0", roughness: 1 }));
+  const bigGeo = new THREE.PlaneGeometry(1200, 1200);
+  const buv = bigGeo.attributes.uv;
+  for (let i = 0; i < buv.count; i++) buv.setXY(i, buv.getX(i) * 300, buv.getY(i) * 300);
+  const big = new THREE.Mesh(bigGeo, grassMat("#a9b98a"));
   big.rotateX(-Math.PI / 2);
   big.position.y = -0.03;
   big.receiveShadow = true;
   g.add(big);
+  // uzak tepeler (sis ile karışır)
+  let seed = 7;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  const hillMat = new THREE.MeshStandardMaterial({ color: "#7d9a6a", roughness: 1, flatShading: false });
+  const hillMat2 = new THREE.MeshStandardMaterial({ color: "#6a8a63", roughness: 1 });
+  for (let i = 0; i < 34; i++) {
+    const a = (i / 34) * Math.PI * 2 + rnd() * 0.2;
+    const rad = 230 + rnd() * 90;
+    const hr = 26 + rnd() * 46;
+    const m = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 12), rnd() > 0.5 ? hillMat : hillMat2);
+    m.scale.set(hr * 1.8, hr * (0.28 + rnd() * 0.3), hr * 1.1);
+    m.position.set(Math.cos(a) * rad, -hr * 0.1, Math.sin(a) * rad);
+    m.rotation.y = -a;
+    g.add(m);
+  }
+}
+
+/** Tüm 3B sahneler için ortak: ton eşleme, ortam yansıması, gökyüzü kubbesi */
+export function decorateScene(scene: THREE.Scene, renderer: THREE.WebGLRenderer) {
+  renderer.toneMapping = THREE.NeutralToneMapping;
+  renderer.toneMappingExposure = 0.92;
+  const pm = new THREE.PMREMGenerator(renderer);
+  const env = pm.fromScene(new RoomEnvironment(), 0.04);
+  scene.environment = env.texture;
+  scene.environmentIntensity = 0.28;
+  pm.dispose();
+  const mat = new THREE.ShaderMaterial({
+    side: THREE.BackSide,
+    depthWrite: false,
+    fog: false,
+    uniforms: { top: { value: new THREE.Color("#6f9fd6") }, bottom: { value: new THREE.Color("#dbe8f3") } },
+    vertexShader: "varying vec3 vP; void main(){ vP = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }",
+    fragmentShader: [
+      "uniform vec3 top; uniform vec3 bottom; varying vec3 vP;",
+      "void main(){ float h = clamp(vP.y, 0.0, 1.0); gl_FragColor = vec4(mix(bottom, top, pow(h, 0.55)), 1.0);",
+      "#include <tonemapping_fragment>",
+      "#include <colorspace_fragment>",
+      "}",
+    ].join("\n"),
+  });
+  const dome = new THREE.Mesh(new THREE.SphereGeometry(800, 24, 16), mat);
+  dome.renderOrder = -10;
+  dome.frustumCulled = false;
+  scene.add(dome);
+  scene.userData.sky = mat;
+  return dome;
+}
+
+/** Gökyüzü kubbesi renklerini ufuk rengine göre ayarla */
+export function setSky(scene: THREE.Scene, horizon: THREE.Color) {
+  const m = scene.userData.sky as THREE.ShaderMaterial | undefined;
+  if (!m) return;
+  m.uniforms.bottom.value.copy(horizon);
+  m.uniforms.top.value.copy(horizon).lerp(new THREE.Color("#3f78c4"), 0.55 * Math.min(1, horizon.getHSL({ h: 0, s: 0, l: 0 }).l * 1.6));
 }
 
 /* ---------------- çevre nesneleri ---------------- */
@@ -872,19 +943,41 @@ function buildEnv(objs: EnvObj[], g: THREE.Group) {
       return mesh;
     };
     const { w, d, h } = o;
+    let hs = 0;
+    for (const ch of o.id) hs = (hs * 31 + ch.charCodeAt(0)) % 9973;
+    const rr = (k: number) => ((Math.sin(hs * 12.9898 + k * 78.233) * 43758.5453) % 1 + 1) % 1;
+    const shade = (c: string, k: number) => {
+      const col = new THREE.Color(c);
+      const hsl = { h: 0, s: 0, l: 0 };
+      col.getHSL(hsl);
+      return col.setHSL(hsl.h + (rr(k) - 0.5) * 0.03, hsl.s, Math.min(0.8, Math.max(0.1, hsl.l + (rr(k + 9) - 0.5) * 0.12)));
+    };
     if (o.kind === "tree") {
-      const th = h * 0.4;
-      add(new THREE.CylinderGeometry(Math.max(0.08, w * 0.04), Math.max(0.12, w * 0.06), th, 8), std("#6b4a2b"), 0, th / 2, 0);
-      const cr = new THREE.IcosahedronGeometry(0.5, 1);
-      const crown = add(cr, std(o.color), 0, th + (h - th) * 0.45, 0);
-      crown.scale.set(w, (h - th) * 1.05, d);
+      const th = h * 0.42;
+      add(new THREE.CylinderGeometry(Math.max(0.06, w * 0.035), Math.max(0.12, w * 0.07), th, 9), std("#6b4a2b"), 0, th / 2, 0);
+      const ch = h - th;
+      const blobs: [number, number, number, number][] = [
+        [0, 0.5, 0, 1],
+        [0.28, 0.42, 0.1, 0.72],
+        [-0.26, 0.45, -0.08, 0.7],
+        [0.05, 0.78, -0.18, 0.62],
+        [-0.1, 0.72, 0.2, 0.6],
+      ];
+      blobs.forEach((b, i) => {
+        const m = add(new THREE.IcosahedronGeometry(0.5, 2), std("#ffffff"), b[0] * w * 0.7, th + ch * b[1], b[2] * d * 0.7);
+        (m.material as THREE.MeshStandardMaterial).color = shade(o.color, i + 1);
+        m.scale.set(w * 0.62 * b[3], ch * 0.62 * b[3], d * 0.62 * b[3]);
+      });
     } else if (o.kind === "pine") {
-      const th = h * 0.18;
-      add(new THREE.CylinderGeometry(0.08, 0.14, th, 8), std("#5a3d22"), 0, th / 2, 0);
-      for (let i = 0; i < 3; i++) {
-        const ch = (h - th) * 0.55;
-        const k = 1 - i * 0.28;
-        const cone = add(new THREE.ConeGeometry(0.5, ch, 9), std(o.color), 0, th + ch / 2 + i * (h - th) * 0.26, 0);
+      const th = h * 0.14;
+      add(new THREE.CylinderGeometry(0.07, 0.14, th + 0.4, 8), std("#5a3d22"), 0, (th + 0.4) / 2, 0);
+      const tiers = 5;
+      for (let i = 0; i < tiers; i++) {
+        const t = i / (tiers - 1);
+        const ch = (h - th) * 0.34;
+        const k = 1 - t * 0.7;
+        const cone = add(new THREE.ConeGeometry(0.5, ch, 12), std("#ffffff"), 0, th + ch / 2 + t * (h - th - ch) * 0.98, 0);
+        (cone.material as THREE.MeshStandardMaterial).color = shade(o.color, i + 3);
         cone.scale.set(w * k, 1, d * k);
       }
     } else if (o.kind === "bush") {

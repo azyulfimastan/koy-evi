@@ -54,6 +54,22 @@ export const CATALOG: CatItem[] = [
   { key: "rug", name: "Halı (2 × 3 m)", cat: "Çalışma / Diğer", w: 2.0, d: 3.0, h: 0.02, shape: "rug", color: "#e9c9c0" },
   { key: "shoe", name: "Ayakkabılık", cat: "Çalışma / Diğer", w: 0.8, d: 0.35, h: 1.0, shape: "rect", color: C.oth },
   { key: "coat", name: "Portmanto", cat: "Çalışma / Diğer", w: 0.6, d: 0.3, h: 1.8, shape: "rect", color: C.oth },
+  { key: "sofaL", name: "Köşe koltuk takımı", cat: "Oturma", w: 2.8, d: 1.7, h: 0.85, shape: "sofa", color: C.sit },
+  { key: "pouf", name: "Puf", cat: "Oturma", w: 0.5, d: 0.5, h: 0.4, shape: "round", color: C.sit },
+  { key: "piano", name: "Piyano", cat: "Oturma", w: 1.5, d: 0.65, h: 1.2, shape: "rect", color: C.sit },
+  { key: "crib", name: "Bebek beşiği", cat: "Yatak odası", w: 0.65, d: 1.2, h: 0.9, shape: "bed", color: C.bed },
+  { key: "kdesk", name: "Çocuk çalışma masası", cat: "Yatak odası", w: 1.0, d: 0.55, h: 0.7, shape: "rect", color: C.bed },
+  { key: "stool", name: "Bar taburesi", cat: "Yemek", w: 0.4, d: 0.4, h: 0.75, shape: "round", color: C.eat },
+  { key: "bench", name: "Bank", cat: "Yemek", w: 1.4, d: 0.4, h: 0.45, shape: "rect", color: C.eat },
+  { key: "upper", name: "Mutfak üst dolabı", cat: "Mutfak", w: 0.8, d: 0.35, h: 0.7, shape: "rect", color: C.kit, elev: 1.4 },
+  { key: "hood", name: "Aspiratör", cat: "Mutfak", w: 0.6, d: 0.5, h: 0.2, shape: "rect", color: "#b8bcc0", elev: 1.65 },
+  { key: "pantry", name: "Kiler dolabı", cat: "Mutfak", w: 0.9, d: 0.5, h: 2.1, shape: "wardrobe", color: C.kit },
+  { key: "wmirror", name: "Banyo aynası", cat: "Banyo", w: 0.6, d: 0.05, h: 0.8, shape: "rect", color: "#cfe3ee", elev: 1.2 },
+  { key: "vanity", name: "Lavabo dolabı", cat: "Banyo", w: 0.8, d: 0.45, h: 0.85, shape: "sink", color: C.bath },
+  { key: "heater", name: "Şofben / termosifon", cat: "Isıtma", w: 0.4, d: 0.35, h: 0.6, shape: "rect", color: C.heat, elev: 1.6 },
+  { key: "plant", name: "Saksı bitkisi", cat: "Çalışma / Diğer", w: 0.4, d: 0.4, h: 1.2, shape: "round", color: "#5d8a4a" },
+  { key: "mirror", name: "Boy aynası", cat: "Çalışma / Diğer", w: 0.5, d: 0.05, h: 1.6, shape: "rect", color: "#cfe3ee" },
+  { key: "bin", name: "Çamaşır sepeti", cat: "Çalışma / Diğer", w: 0.4, d: 0.4, h: 0.6, shape: "round", color: C.oth },
 ];
 
 export function drawItem(

@@ -93,6 +93,7 @@ export default function Report({ full, name, onClose }: { full: FullData; name: 
           </section>
         )}
         {tbl("Malzeme miktarı (yaklaşık)", rep.lines)}
+        {tbl("Kaba yapı ve tesisat (tahmini)", rep.rough)}
         {tbl("Kapı ve pencereler", rep.openings)}
         {tbl("Eşyalar", rep.items)}
         <p className="rnote">Miktarlar plandan otomatik hesaplanır ve yaklaşıktır; fire payı %{rep.waste * 100} eklenmiştir.</p>

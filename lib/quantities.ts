@@ -1,7 +1,7 @@
 import type { FullData } from "./types";
 import { area, fmt } from "./geo";
 import { rasterize, regionAt } from "./rooms";
-import { outsideFn } from "./scene3d";
+import { outsideFn, outsideMask } from "./scene3d";
 import { roofInfo } from "./roof";
 import { EXT_TEX, FLOOR_TEX, INT_TEX, ROOF_TEX } from "./textures";
 
@@ -9,6 +9,7 @@ export type RoomRow = { floor: string; name: string; area: number };
 export type Line = { name: string; qty: number; unit: string; note?: string };
 
 export type Report = {
+  rough: Line[]; // kaba yapı ve tesisat (tahmini)
   plotArea: number | null;
   footprint: number; // zemin kat kapalı oda + duvar alanı yaklaşığı
   totalArea: number; // tüm katların oda alanı toplamı
@@ -39,6 +40,16 @@ export function computeReport(f: FullData): Report {
   const opens = new Map<string, number>();
   const items = new Map<string, number>();
   let stairs = 0;
+  let foundLen = 0,
+    beamVol = 0,
+    slabVol = 0,
+    slabArea = 0,
+    lintel = 0,
+    sockets = 0,
+    switches = 0,
+    wet = 0,
+    rads = 0;
+  const WET = new Set(["sinkK", "basin", "vanity", "wc", "tub", "shower", "washer", "dish", "cooker"]);
 
   f.floors.forEach((fl, fi) => {
     const isOut = outsideFn(fl);
@@ -80,11 +91,31 @@ export function computeReport(f: FullData): Report {
       const a = reg.area;
       rooms.push({ floor: fl.name, name: rm.name, area: r2(a) });
       ceil += a;
+      sockets += Math.max(4, Math.ceil(a / 3));
+      switches += 1;
       const k = rm.floor && rm.floor !== "none" ? rm.floor : "none";
       floorTex.set(k, (floorTex.get(k) ?? 0) + a);
       if (fi === 0) footprint += a;
     }
     stairs += fl.stairs.length;
+    if (fl.walls.length) {
+      const len = fl.walls.reduce((sum, w) => sum + Math.hypot(w.b.x - w.a.x, w.b.y - w.a.y), 0);
+      beamVol += fl.walls.reduce((sum, w) => sum + Math.hypot(w.b.x - w.a.x, w.b.y - w.a.y) * w.t * 0.2, 0);
+      if (fi === 0) foundLen = len;
+      if (ras) {
+        const out = outsideMask(ras);
+        let n = 0;
+        for (let k = 0; k < out.length; k++) if (!out[k]) n++;
+        const a = n * ras.cell * ras.cell;
+        slabArea += a;
+        slabVol += a * 0.15;
+      }
+    }
+    lintel += fl.openings.reduce((sum, o) => sum + o.w + 0.4, 0);
+    for (const it of fl.items) {
+      if (WET.has(it.key)) wet++;
+      if (it.key === "rad") rads++;
+    }
     for (const it of fl.items) items.set(it.name, (items.get(it.name) ?? 0) + 1);
   });
 
@@ -112,6 +143,22 @@ export function computeReport(f: FullData): Report {
   const itemL: Line[] = [...items].sort((a, b) => a[0].localeCompare(b[0], "tr")).map(([name, qty]) => ({ name, qty, unit: "adet" }));
   void extWallLen;
 
+  const rough: Line[] = [];
+  const ar = (name: string, qty: number, unit: string, note?: string) => qty > 0.004 && rough.push({ name, qty: r2(qty), unit, note });
+  const fw = Math.max(0.5, (f.floors[0]?.walls[0]?.t ?? 0.25) + 0.3);
+  ar("Temel (şerit) betonu", foundLen * fw * 0.8, "m³", `${fmt(foundLen)} m × ${fmt(fw)} m genişlik × 0,80 m derinlik varsayımı`);
+  ar("Grobeton (temel altı, 10 cm)", foundLen * fw * 0.1, "m³");
+  ar("Zemin/ara döşeme betonu (15 cm)", slabVol, "m³", `${fmt(slabArea)} m² döşeme alanı`);
+  ar("Hatıl betonu (her katta duvar üstü)", beamVol, "m³", "20 cm yükseklik varsayımı");
+  ar("Lento (kapı/pencere üstü) toplam boy", lintel, "m");
+  ar("Elektrik: priz", sockets, "adet", "oda alanına göre tahmini");
+  ar("Elektrik: anahtar / lamba noktası", switches, "adet");
+  ar("Elektrik: kablo (yaklaşık)", (sockets + switches * 2) * 10, "m", "nokta başına ~10 m");
+  ar("Tesisat: su/gider noktası", wet, "adet", "lavabo, klozet, duş, küvet, evye, makineler");
+  ar("Tesisat: boru (yaklaşık)", wet * 8, "m", "nokta başına ~8 m");
+  ar("Radyatör", rads, "adet");
+  ar("Mantolama (dış cephe yalıtımı)", extArea, "m²", "isteğe bağlı, dış cephe alanı kadar");
+
   let total = 0;
   rooms.forEach((r) => (total += r.area));
   return {
@@ -120,6 +167,7 @@ export function computeReport(f: FullData): Report {
     totalArea: r2(total),
     height: f.floors.reduce((s, fl) => s + fl.height, 0),
     rooms,
+    rough,
     lines,
     openings,
     items: itemL,

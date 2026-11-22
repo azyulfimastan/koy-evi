@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { FullData } from "@/lib/types";
-import { buildHouse, disposeTree, floorBases, roomAtPoint, type V3 } from "@/lib/scene3d";
+import { buildHouse, decorateScene, setSky, disposeTree, floorBases, roomAtPoint, type V3 } from "@/lib/scene3d";
 import { sunDir } from "@/lib/env";
 
 type Preset = "corner" | "front" | "side" | "top" | "keep";
@@ -68,6 +68,7 @@ export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onE
     const scene = new THREE.Scene();
     scene.background = new THREE.Color("#dbe8f3");
     scene.fog = new THREE.Fog("#dbe8f3", 90, 300);
+    decorateScene(scene, renderer);
     const hemi = new THREE.HemisphereLight("#f2f6ff", "#a89a7c", 1.7);
     scene.add(hemi);
     scene.add(new THREE.AmbientLight("#ffffff", 0.35));
@@ -371,7 +372,9 @@ export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onE
       disposeTree(a.root);
     }
     const f = fullRef.current;
+    const t0 = performance.now();
     const { house, ground, env } = buildHouse(f, fi, v3);
+    (window as unknown as { __v3ms?: number }).__v3ms = Math.round(performance.now() - t0);
     const root = new THREE.Group();
     root.add(ground, house, env);
     a.scene.add(root);
@@ -554,6 +557,7 @@ function applySun(a: Api, f: FullData) {
   const sky = new THREE.Color("#1b2436").lerp(new THREE.Color("#f0a46b"), Math.max(0, Math.min(1, (d.alt + 6) / 12))).lerp(new THREE.Color("#dbe8f3"), Math.max(0, Math.min(1, (d.alt - 4) / 20)));
   (a.scene.background as THREE.Color).copy(sky);
   (a.scene.fog as THREE.Fog).color.copy(sky);
+  setSky(a.scene, sky);
 }
 
 function frame(a: { camera: THREE.PerspectiveCamera; controls: OrbitControls }, house: THREE.Object3D, p: Preset) {

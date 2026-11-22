@@ -1,15 +1,15 @@
 import * as THREE from "three";
 
 /** Kaplama seçenekleri (Türkçe adlarıyla) */
-export const EXT_TEX: [string, string][] = [["plain", "Düz sıva"], ["brick", "Tuğla"], ["stone", "Taş"], ["wood", "Ahşap kaplama"]];
-export const INT_TEX: [string, string][] = [["plain", "Düz boya"], ["wood", "Ahşap lambri"]];
-export const ROOF_TEX: [string, string][] = [["tile", "Kiremit"], ["metal", "Sac (metal)"], ["shingle", "Şingle"], ["plain", "Düz"]];
-export const FLOOR_TEX: [string, string][] = [["none", "Varsayılan"], ["parquet", "Parke"], ["fayans", "Fayans"], ["concrete", "Beton"], ["carpet", "Halı / düz"]];
-export const FLOOR_DEFAULT: Record<string, string> = { parquet: "#c89a64", fayans: "#e6eef0", concrete: "#b9b6b0", carpet: "#cdbfa8" };
+export const EXT_TEX: [string, string][] = [["plain", "Düz sıva"], ["brick", "Tuğla"], ["stone", "Taş"], ["wood", "Ahşap kaplama"], ["rough", "Kaba sıva"], ["adobe", "Kerpiç / toprak sıva"]];
+export const INT_TEX: [string, string][] = [["plain", "Düz boya"], ["wood", "Ahşap lambri"], ["fayans", "Fayans"], ["rough", "Kaba sıva"]];
+export const ROOF_TEX: [string, string][] = [["tile", "Kiremit"], ["metal", "Sac (metal)"], ["shingle", "Şingle"], ["slate", "Kayrak taş"], ["plain", "Düz"]];
+export const FLOOR_TEX: [string, string][] = [["none", "Varsayılan"], ["parquet", "Parke"], ["fayans", "Fayans"], ["concrete", "Beton"], ["carpet", "Halı / düz"], ["laminate", "Laminat"], ["marble", "Mermer"]];
+export const FLOOR_DEFAULT: Record<string, string> = { laminate: "#b98a5c", marble: "#e8e6e1", parquet: "#c89a64", fayans: "#e6eef0", concrete: "#b9b6b0", carpet: "#cdbfa8" };
 export const SWATCHES = ["#f4f0e8", "#e9e1d3", "#d9c9a8", "#c9a37a", "#a5523a", "#8a5a36", "#7a8f6a", "#8fa8b8", "#b9b6b0", "#5d5a55", "#2f3a4a", "#ffffff"];
 
 /** Dokunun metre cinsinden kapladığı kenar uzunluğu */
-export const TEX_SIZE: Record<string, number> = { brick: 1, stone: 1.5, wood: 1, tile: 1, metal: 1, shingle: 1, parquet: 1.2, fayans: 1.2, concrete: 2 };
+export const TEX_SIZE: Record<string, number> = { brick: 1, stone: 1.5, wood: 1, tile: 1, metal: 1, shingle: 1, parquet: 1.2, fayans: 1.2, rough: 1.5, adobe: 2, grass: 4, slate: 1.2, laminate: 1.4, marble: 2, concrete: 2 };
 
 const cache = new Map<string, THREE.CanvasTexture>();
 
@@ -157,6 +157,104 @@ export function getTex(key: string): THREE.CanvasTexture | null {
         g.fillStyle = gray(240 + r() * 15);
         g.fillRect((k * N) / n + 2.5, (i * N) / n + 2.5, N / n - 5, N / n - 5);
       }
+  } else if (key === "rough") {
+    g.fillStyle = gray(215);
+    g.fillRect(0, 0, N, N);
+    for (let i = 0; i < 7000; i++) {
+      g.fillStyle = `rgba(${r() > 0.5 ? "255,255,255" : "0,0,0"},${0.05 + r() * 0.12})`;
+      rect(r() * N, r() * N, 1 + r() * 3, 1 + r() * 3);
+    }
+  } else if (key === "adobe") {
+    g.fillStyle = gray(225);
+    g.fillRect(0, 0, N, N);
+    for (let i = 0; i < 90; i++) {
+      const x = r() * N;
+      const y = r() * N;
+      const rad = 25 + r() * 70;
+      for (const dx of [0, -N, N]) {
+        const gr = g.createRadialGradient(x + dx, y, 0, x + dx, y, rad);
+        const a = 0.05 + r() * 0.1;
+        gr.addColorStop(0, `rgba(${r() > 0.5 ? "0,0,0" : "255,255,255"},${a})`);
+        gr.addColorStop(1, "rgba(0,0,0,0)");
+        g.fillStyle = gr;
+        g.fillRect(x + dx - rad, y - rad, rad * 2, rad * 2);
+      }
+    }
+  } else if (key === "slate") {
+    const rows = 7;
+    const rh = N / rows;
+    const cw = N / 4;
+    g.fillStyle = gray(90);
+    g.fillRect(0, 0, N, N);
+    for (let i = 0; i < rows; i++)
+      for (let k = 0; k < 4; k++) {
+        g.fillStyle = gray(150 + r() * 70);
+        rect(k * cw + (i % 2) * (cw / 2) + 2, i * rh + 2, cw - 4, rh - 4);
+        g.fillStyle = "rgba(0,0,0,0.25)";
+        rect(k * cw + (i % 2) * (cw / 2) + 2, i * rh + rh - 6, cw - 4, 4);
+      }
+  } else if (key === "laminate") {
+    const rows = 6;
+    const rh = N / rows;
+    g.fillStyle = gray(150);
+    g.fillRect(0, 0, N, N);
+    for (let i = 0; i < rows; i++) {
+      let x = -r() * N * 0.6;
+      while (x < N) {
+        const w = N * (0.5 + r() * 0.5);
+        g.fillStyle = gray(210 + r() * 40);
+        rect(x + 1, i * rh + 1, w - 2, rh - 2);
+        g.strokeStyle = "rgba(90,90,90,0.15)";
+        g.beginPath();
+        g.moveTo(x + 4, i * rh + rh * 0.3);
+        g.lineTo(x + w - 4, i * rh + rh * 0.35);
+        g.moveTo(x + 4, i * rh + rh * 0.7);
+        g.lineTo(x + w - 4, i * rh + rh * 0.66);
+        g.stroke();
+        x += w;
+      }
+    }
+  } else if (key === "marble") {
+    g.fillStyle = gray(240);
+    g.fillRect(0, 0, N, N);
+    g.strokeStyle = "rgba(90,90,100,0.3)";
+    for (let i = 0; i < 14; i++) {
+      g.lineWidth = 0.5 + r() * 2;
+      g.beginPath();
+      const y0 = r() * N;
+      g.moveTo(0, y0);
+      g.bezierCurveTo(N * 0.3, y0 + (r() - 0.5) * 160, N * 0.6, y0 + (r() - 0.5) * 160, N, y0 + (r() - 0.5) * 90);
+      g.stroke();
+    }
+    g.strokeStyle = "rgba(60,60,60,0.45)";
+    g.lineWidth = 3;
+    g.strokeRect(0, 0, N, N);
+  } else if (key === "grass") {
+    g.fillStyle = gray(225);
+    g.fillRect(0, 0, N, N);
+    for (let i = 0; i < 260; i++) {
+      const x = r() * N;
+      const y = r() * N;
+      const rad = 18 + r() * 50;
+      for (const dx of [0, -N, N])
+        for (const dy of [0, -N, N]) {
+          const gr = g.createRadialGradient(x + dx, y + dy, 0, x + dx, y + dy, rad);
+          gr.addColorStop(0, `rgba(${r() > 0.5 ? "255,255,255" : "0,0,0"},${0.025 + r() * 0.04})`);
+          gr.addColorStop(1, "rgba(0,0,0,0)");
+          g.fillStyle = gr;
+          g.fillRect(x + dx - rad, y + dy - rad, rad * 2, rad * 2);
+        }
+    }
+    for (let i = 0; i < 9000; i++) {
+      g.strokeStyle = `rgba(${r() > 0.5 ? "255,255,255" : "0,0,0"},${0.05 + r() * 0.08})`;
+      g.lineWidth = 1;
+      const x = r() * N;
+      const y = r() * N;
+      g.beginPath();
+      g.moveTo(x, y);
+      g.lineTo(x + (r() - 0.5) * 4, y - 3 - r() * 6);
+      g.stroke();
+    }
   } else {
     g.fillStyle = gray(200);
     g.fillRect(0, 0, N, N);

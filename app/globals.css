@@ -143,3 +143,23 @@ input[type=color] { height: 30px; width: 56px; padding: 2px; cursor: pointer; bo
 .rtab .rq { text-align: right; white-space: nowrap; font-weight: 600; padding-left: 10px; }
 .rnote { font-size: 12.5px; color: #7a7466; font-weight: 400; }
 .rerr { color: #b3402a; }
+
+.floors .v3btn.gd { margin-left: 0; background: #fff; color: #2b2a26; border-color: var(--line); padding: 8px 10px; }
+.guide { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 8px 12px; background: #eaf3dd; border-bottom: 1px solid #c9dcb0; position: relative; }
+.guide .gtxt { flex: 1 1 260px; display: flex; flex-direction: column; font-size: 14px; line-height: 1.35; }
+.guide .gtxt b { font-size: 15px; color: #2f5320; }
+.guide .gbtn { display: flex; gap: 6px; }
+.guide button { padding: 8px 12px; border-radius: 10px; border: 1px solid #b9cfa0; background: #fff; font-size: 14px; }
+.guide button.go { background: #3f6b2a; border-color: #3f6b2a; color: #fff; font-weight: 600; }
+.gdots { display: flex; gap: 5px; width: 100%; }
+.gdots i { flex: 1; height: 5px; border-radius: 3px; background: #cdd8bd; }
+.gdots i.ok { background: #3f6b2a; }
+.gdots i.cur { background: #e0a030; }
+.gdots i.sk { background: #b7b19d; }
+.guide { min-height: 58px; align-content: center; }
+.guide .gtxt span { font-size: 13.5px; color: #3d4a31; }
+@media (max-width: 640px) {
+  .guide { min-height: 54px; padding: 6px 10px; }
+  .guide .gtxt { flex: 1 1 120px; }
+  .guide .gtxt span { display: none; }
+}
