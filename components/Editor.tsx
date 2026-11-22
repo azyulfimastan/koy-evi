@@ -9,6 +9,10 @@ import { area, bounds, dist, fmt, perimeter, round3, setEdgeLength, snapTo, segP
 import { endJoins, inRegion, rasterize, regionAt, wallGeom } from "@/lib/rooms";
 import type { Region } from "@/lib/rooms";
 import { VERSION } from "./App";
+import dynamic from "next/dynamic";
+import { totalHeight, type V3 } from "@/lib/scene3d";
+
+const View3D = dynamic(() => import("./View3D"), { ssr: false, loading: () => <div className="v3 v3load">3D hazırlanıyor…</div> });
 
 type View = { s: number; ox: number; oy: number };
 type Saved = "saved" | "saving" | "error";
@@ -53,6 +57,10 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
   const [chain, setChain] = useState<Pt | null>(null);
   const [note, setNote] = useState("");
   const [pick, setPick] = useState<CatItem | null>(null);
+  const [is3d, setIs3d] = useState(false);
+  const is3dRef = useRef(is3d);
+  is3dRef.current = is3d;
+  const [v3, setV3] = useState<V3>({ floors: "all", roof: true, items: true, cut: false });
   const [cat, setCat] = useState(CATS[0]);
   const [cust, setCust] = useState({ name: "", w: "100", d: "60", h: "75", color: "#d9d3b8" });
   const [saved, setSaved] = useState<Saved>("saved");
@@ -1312,6 +1320,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
       if (t.tagName === "INPUT" || t.tagName === "SELECT") return;
+      if (is3dRef.current) return;
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
         e.preventDefault();
         e.shiftKey ? redo() : undo();
@@ -1386,8 +1395,12 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
             {fl.name}
           </button>
         ))}
-        <button className="add" onClick={addFloor}>+ Kat</button>
+        {!is3d && <button className="add" onClick={addFloor}>+ Kat</button>}
+        <button className={"v3btn" + (is3d ? " on" : "")} onClick={() => { setIs3d((v) => !v); setSel(null); setChain(null); }}>
+          {is3d ? "◧ 2D plana dön" : "🧊 3D görünüm"}
+        </button>
       </div>
+      {!is3d && (<>
       <div className="tools modes">
         {modes.map(([t, l]) => (
           <button key={t} className={tool === t ? "on" : ""} onClick={() => chooseTool(t)}>
@@ -1414,9 +1427,11 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
           {panel ? "Panel ▾" : "Panel ▴"}
         </button>
       </div>
+      </>)}
 
       <div className="stage">
-        <div className="cv" ref={wrap}>
+        {is3d && <View3D full={full} fi={fi} v3={v3} name={name} />}
+        <div className="cv" ref={wrap} style={is3d ? { display: "none" } : undefined}>
           <canvas
             ref={cv}
             onPointerDown={onDown}
@@ -1439,6 +1454,31 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
 
         {panel && (
           <aside className="side">
+            {is3d ? (
+              <>
+                <h3>3D görünüm</h3>
+                <label className="edge">
+                  <span>Katlar</span>
+                  <select value={v3.floors} onChange={(e) => setV3({ ...v3, floors: e.target.value as V3["floors"] })}>
+                    <option value="all">Tüm katlar</option>
+                    <option value="upto">{full.floors[fi]?.name}’e kadar</option>
+                    <option value="only">Yalnız {full.floors[fi]?.name}</option>
+                  </select>
+                </label>
+                <label className="chk"><input type="checkbox" checked={v3.cut} onChange={(e) => setV3({ ...v3, cut: e.target.checked })} /> Kesit: seçili katın içini gör</label>
+                <label className="chk"><input type="checkbox" checked={v3.roof} disabled={v3.cut} onChange={(e) => setV3({ ...v3, roof: e.target.checked })} /> Çatıyı göster</label>
+                <label className="chk"><input type="checkbox" checked={v3.items} onChange={(e) => setV3({ ...v3, items: e.target.checked })} /> Eşyaları göster</label>
+                <div className="stats">
+                  <div><span>Kat sayısı</span><b>{full.floors.length}</b></div>
+                  <div><span>Toplam yükseklik</span><b>{fmt(totalHeight(full), 2)} m</b></div>
+                </div>
+                <div className="muted small">
+                  Döndür: sürükle (tek parmak). Yakınlaştır: tekerlek / iki parmak. Kaydır: sağ tık veya iki parmakla sürükle.
+                  Kat seçmek için üstteki kat düğmelerini kullan.
+                </div>
+                {full.floors.every((fl) => !fl.walls.length) && <div className="muted small">Henüz duvar yok. 2D planda duvar çizince ev burada görünür.</div>}
+              </>
+            ) : (<>
             {/* --- Arsa aracı --- */}
             {tool === "plot" && (
               <>
@@ -1756,6 +1796,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
                 {tool === "select" && walls.length === 0 && <div className="muted small">Başlamak için “Duvar” aracını seç.</div>}
               </>
             )}
+            </>)}
             <div className="ver pushb">Köy Evi Tasarım {VERSION}</div>
           </aside>
         )}
