@@ -1,9 +1,10 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { FullData, Floor, Opening, PlanData, Pt, Room, Stair, Wall } from "@/lib/types";
+import type { CatItem, FullData, Item, Opening, PlanData, Pt, Room, Stair, Wall } from "@/lib/types";
 import { flatten, newFloor, normalizeFull, uid, unflatten, defaultFull } from "@/lib/types";
 import { roofInfo, ATTIC_MIN } from "@/lib/roof";
 import { drawStair, stairBox, stairLocal, stairSteps } from "@/lib/stairs";
+import { CATALOG, CATS, drawItem, itemLocal } from "@/lib/furniture";
 import { area, bounds, dist, fmt, perimeter, round3, setEdgeLength, snapTo, segProject } from "@/lib/geo";
 import { endJoins, inRegion, rasterize, regionAt, wallGeom } from "@/lib/rooms";
 import type { Region } from "@/lib/rooms";
@@ -11,14 +12,15 @@ import { VERSION } from "./App";
 
 type View = { s: number; ox: number; oy: number };
 type Saved = "saved" | "saving" | "error";
-type Tool = "select" | "plot" | "wall" | "door" | "window" | "room" | "stair" | "roof";
+type Tool = "select" | "plot" | "wall" | "door" | "window" | "room" | "furn" | "stair" | "roof";
 type Sel =
   | null
   | { k: "pv"; i: number }
   | { k: "wall"; id: string }
   | { k: "op"; id: string }
   | { k: "room"; id: string }
-  | { k: "stair"; id: string };
+  | { k: "stair"; id: string }
+  | { k: "item"; id: string };
 
 const cloneF = (d: FullData): FullData => JSON.parse(JSON.stringify(d));
 const ROOM_COLORS = ["#f2d9a6", "#bfe0c4", "#c9d9f0", "#f0c9c9", "#e4d0f0", "#f0e6a8"];
@@ -32,6 +34,7 @@ const TOOL_HINT: Record<Tool, string> = {
   door: "Kapı koymak istediğin duvara dokun.",
   window: "Pencere koymak istediğin duvara dokun.",
   room: "Duvarlarla kapalı bir alanın içine dokun, oda otomatik oluşur.",
+  furn: "Listeden bir eşya seç, sonra odada yerleştireceğin noktaya dokun.",
   stair: "Merdivenin yerleşeceği noktaya dokun. Basamak sayısı kat yüksekliğinden hesaplanır.",
   roof: "Çatı türünü ve eğimini panelden ayarla. Taslak, en üst katın dış sınırına göre çizilir.",
 };
@@ -49,6 +52,9 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
   const [hover, setHover] = useState<Pt | null>(null);
   const [chain, setChain] = useState<Pt | null>(null);
   const [note, setNote] = useState("");
+  const [pick, setPick] = useState<CatItem | null>(null);
+  const [cat, setCat] = useState(CATS[0]);
+  const [cust, setCust] = useState({ name: "", w: "100", d: "60", h: "75", color: "#d9d3b8" });
   const [saved, setSaved] = useState<Saved>("saved");
   const [loaded, setLoaded] = useState(false);
   const [panel, setPanel] = useState(true);
@@ -77,7 +83,9 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
   const selRef = useRef(sel);
   selRef.current = sel;
 
-  const { plot, walls, openings, rooms, stairs } = data;
+  const { plot, walls, openings, rooms, stairs, items, custom } = data;
+  const pickRef = useRef(pick);
+  pickRef.current = pick;
 
   // ---------- türetilmiş veri ----------
   const joins = useMemo(() => endJoins(walls), [walls]);
@@ -141,28 +149,59 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
   }, [id]);
 
   // ---------- otomatik kaydet ----------
+  const latest = useRef({ name, full });
+  latest.current = { name, full };
+  const dirty = useRef(false);
+  const ver = useRef(0);
   const first = useRef(true);
+
+  const putNow = useCallback(
+    async (keepalive = false) => {
+      const v = ver.current;
+      const body = JSON.stringify({ name: latest.current.name, data: latest.current.full });
+      try {
+        const r = await fetch("/api/projects/" + id, { method: "PUT", headers: { "Content-Type": "application/json" }, body, keepalive });
+        if (r.ok && v === ver.current) dirty.current = false;
+        setSaved(r.ok ? (v === ver.current ? "saved" : "saving") : "error");
+      } catch {
+        setSaved("error");
+      }
+    },
+    [id]
+  );
+
   useEffect(() => {
     if (!loaded) return;
     if (first.current) {
       first.current = false;
       return;
     }
+    dirty.current = true;
+    ver.current += 1;
     setSaved("saving");
-    const t = setTimeout(async () => {
-      try {
-        const r = await fetch("/api/projects/" + id, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name, data: full }),
-        });
-        setSaved(r.ok ? "saved" : "error");
-      } catch {
-        setSaved("error");
-      }
-    }, 700);
+    const t = setTimeout(() => putNow(), 600);
     return () => clearTimeout(t);
-  }, [full, name, loaded, id]);
+  }, [full, name, loaded, putNow]);
+
+  // sayfadan/Editor'den çıkarken bekleyen değişikliği hemen gönder
+  useEffect(() => {
+    const flush = () => {
+      if (dirty.current) putNow(true);
+    };
+    const onVis = () => document.visibilityState === "hidden" && flush();
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      document.removeEventListener("visibilitychange", onVis);
+      flush();
+    };
+  }, [putNow]);
+
+  async function goBack() {
+    if (dirty.current) await putNow();
+    onBack();
+  }
 
   useEffect(() => {
     if (!note) return;
@@ -512,6 +551,10 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
       const isSel = sel?.k === "stair" && sel.id === st.id;
       drawStair(g, st, data.height, s, ox, oy, { color: isSel ? "#d9822b" : "#3d382f", fill: "rgba(255,255,255,0.7)", lw: isSel ? 2.5 : 1.3 });
     }
+    // eşyalar (halılar altta)
+    const ordered = [...items].sort((a, b) => (a.shape === "rug" ? 0 : 1) - (b.shape === "rug" ? 0 : 1));
+    for (const it of ordered) drawItem(g, it, s, ox, oy, { selected: sel?.k === "item" && sel.id === it.id, label: true });
+    if (tool === "furn" && pick && hover) drawItem(g, { x: hover.x, y: hover.y, rot: 0, w: pick.w, d: pick.d, shape: pick.shape, color: pick.color, name: pick.name }, s, ox, oy, { ghost: true });
     // alttaki katın merdiveni burada boşluk olarak görünür (hayalet çizildi)
     if (tool === "stair" && hover) {
       const prev: Stair = { id: "p", kind: "straight", x: hover.x, y: hover.y, rot: 0, w: 1, mirror: false };
@@ -738,7 +781,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
     g.textBaseline = "bottom";
     g.fillText(m >= 1 ? `${m} m` : `${m * 100} cm`, bx + 4, by - 6);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, full, fi, view, sel, hover, chain, tool, regions, roomCanvases, joins]);
+  }, [data, full, fi, view, sel, hover, chain, tool, pick, regions, roomCanvases, joins]);
 
   useEffect(() => {
     draw();
@@ -760,6 +803,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
     | { kind: "wend"; id: string; which: "a" | "b"; from: Pt; before: FullData }
     | { kind: "wmove"; id: string; start: Pt; a0: Pt; b0: Pt; before: FullData; moved: boolean }
     | { kind: "op"; id: string; before: FullData; moved: boolean }
+    | { kind: "imove"; id: string; start: Pt; x0: number; y0: number; before: FullData; moved: boolean }
     | { kind: "smove"; id: string; start: Pt; x0: number; y0: number; before: FullData; moved: boolean }
     | { kind: "pinch"; d: number; s: number; cx: number; cy: number };
   const drag = useRef<Drag>(null);
@@ -909,6 +953,30 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
       return;
     }
 
+    if (t === "furn") {
+      drag.current = pan(() => {
+        const cur = dataRef.current;
+        const pk = pickRef.current;
+        const wp = toWorld(p.x, p.y);
+        if (!pk) {
+          const hit = [...cur.items].reverse().find((it) => {
+            const lp = itemLocal(it, wp);
+            return Math.abs(lp.x) <= it.w / 2 && Math.abs(lp.y) <= it.d / 2;
+          });
+          if (hit) {
+            setSel({ k: "item", id: hit.id });
+            setTool("select");
+          } else setNote("Önce listeden bir eşya seç.");
+          return;
+        }
+        const pos = sn(wp);
+        const it: Item = { id: uid(), key: pk.key, name: pk.name, shape: pk.shape, x: pos.x, y: pos.y, rot: 0, w: pk.w, d: pk.d, h: pk.h, elev: pk.elev ?? 0, color: pk.color };
+        apply({ ...cur, items: [...cur.items, it] });
+        setSel({ k: "item", id: it.id });
+      });
+      return;
+    }
+
     if (t === "stair") {
       drag.current = pan(() => {
         const cur = dataRef.current;
@@ -966,6 +1034,15 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
         }
       }
     }
+    for (let i = d.items.length - 1; i >= 0; i--) {
+      const it = d.items[i];
+      const lp = itemLocal(it, w);
+      if (Math.abs(lp.x) <= it.w / 2 && Math.abs(lp.y) <= it.d / 2) {
+        setSel({ k: "item", id: it.id });
+        drag.current = { kind: "imove", id: it.id, start: w, x0: it.x, y0: it.y, before: cloneFull(), moved: false };
+        return;
+      }
+    }
     for (const st of d.stairs) {
       const lp = stairLocal(st, w);
       const bx = stairBox(st, d.height);
@@ -1009,7 +1086,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
       if (t === "wall") setHover(snapWall(wpt, chainRef.current));
       else if (t === "plot" && !dataRef.current.plot.closed) setHover(sn(wpt));
       else if (t === "door" || t === "window") setHover(wpt);
-      else if (t === "stair") setHover(sn(wpt));
+      else if (t === "stair" || t === "furn") setHover(sn(wpt));
     };
     if (!d) {
       updateHover();
@@ -1079,6 +1156,14 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
         return nw;
       });
       setData({ ...cur, walls: walls2 });
+    } else if (d.kind === "imove") {
+      const cur = dataRef.current;
+      const dx = wpt.x - d.start.x;
+      const dy = wpt.y - d.start.y;
+      if (!d.moved && Math.hypot(dx, dy) * viewRef.current.s < 6) return;
+      d.moved = true;
+      const np = sn({ x: d.x0 + dx, y: d.y0 + dy });
+      setData({ ...cur, items: cur.items.map((q) => (q.id === d.id ? { ...q, x: np.x, y: np.y } : q)) });
     } else if (d.kind === "smove") {
       const cur = dataRef.current;
       const dx = wpt.x - d.start.x;
@@ -1109,6 +1194,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
     }
     if (d.kind === "wmove" && !d.moved) return;
     if (d.kind === "smove" && !d.moved) return;
+    if (d.kind === "imove" && !d.moved) return;
     if (d.kind === "op" && !d.moved) return;
     if (JSON.stringify(fullRef.current) !== JSON.stringify(d.before)) commit(d.before);
   }
@@ -1147,6 +1233,8 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
       apply({ ...d, rooms: d.rooms.filter((r) => r.id !== s.id) });
     } else if (s.k === "stair") {
       apply({ ...d, stairs: d.stairs.filter((q) => q.id !== s.id) });
+    } else if (s.k === "item") {
+      apply({ ...d, items: d.items.filter((q) => q.id !== s.id) });
     }
     setSel(null);
   }
@@ -1156,9 +1244,35 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
     chainFirst.current = null;
     setHover(null);
     if (t !== "select") setSel(null);
+    if (t !== "furn") setPick(null);
   }
   const patchWall = (id: string, f: (w: Wall) => Wall) => apply({ ...dataRef.current, walls: dataRef.current.walls.map((w) => (w.id === id ? f(w) : w)) });
   const patchOp = (id: string, f: (o: Opening) => Opening) => apply({ ...dataRef.current, openings: dataRef.current.openings.map((o) => (o.id === id ? f(o) : o)) });
+  const patchItem = (id: string, f: (q: Item) => Item) => apply({ ...dataRef.current, items: dataRef.current.items.map((q) => (q.id === id ? f(q) : q)) });
+  function dupItem(it: Item) {
+    const n: Item = { ...it, id: uid(), x: round3(it.x + 0.3), y: round3(it.y + 0.3) };
+    apply({ ...dataRef.current, items: [...dataRef.current.items, n] });
+    setSel({ k: "item", id: n.id });
+  }
+  function addCustom() {
+    const num = (t: string, def: number) => {
+      const v = parseFloat(t.replace(",", "."));
+      return isFinite(v) && v > 0 ? v : def;
+    };
+    const ci: CatItem = {
+      key: "c" + uid(),
+      name: cust.name.trim() || "Özel eşya",
+      cat: "Özel",
+      w: round3(Math.min(20, num(cust.w, 100) / 100)),
+      d: round3(Math.min(20, num(cust.d, 60) / 100)),
+      h: round3(Math.min(5, num(cust.h, 75) / 100)),
+      shape: "rect",
+      color: cust.color,
+    };
+    apply({ ...dataRef.current, custom: [...dataRef.current.custom, ci] });
+    setPick(ci);
+    setCat("Özel");
+  }
   const patchStair = (id: string, f: (q: Stair) => Stair) => apply({ ...dataRef.current, stairs: dataRef.current.stairs.map((q) => (q.id === id ? f(q) : q)) });
   function chooseFloor(i: number) {
     setFi(i);
@@ -1210,7 +1324,8 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
         setSel(null);
         setChain(null);
         chainFirst.current = null;
-        if (toolRef.current !== "plot") setTool("select");
+        if (pickRef.current) setPick(null);
+        else if (toolRef.current !== "plot") setTool("select");
       }
     };
     window.addEventListener("keydown", onKey);
@@ -1225,6 +1340,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
   const selOp = sel?.k === "op" ? openings.find((o) => o.id === sel.id) : undefined;
   const selOpWall = selOp ? walls.find((w) => w.id === selOp.wall) : undefined;
   const selRoom = sel?.k === "room" ? rooms.find((r) => r.id === sel.id) : undefined;
+  const selItem = sel?.k === "item" ? items.find((q) => q.id === sel.id) : undefined;
   const selStair = sel?.k === "stair" ? stairs.find((q) => q.id === sel.id) : undefined;
   const totalRoomArea = rooms.reduce((s, r) => {
     const reg = regions.get(r.id);
@@ -1250,6 +1366,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
     ["door", "Kapı"],
     ["window", "Pencere"],
     ["room", "Oda"],
+    ["furn", "Eşya"],
     ["stair", "Merdiven"],
     ["roof", "Çatı"],
   ];
@@ -1257,7 +1374,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
   return (
     <div className="editor">
       <div className="bar">
-        <button onClick={onBack}>← Evlerim</button>
+        <button onClick={goBack}>← Evlerim</button>
         <input className="nm" value={name} onChange={(e) => setName(e.target.value)} aria-label="Ev adı" />
         <span className={"stat " + saved}>{stat}</span>
         <span className="ver">Köy Evi Tasarım {VERSION}</span>
@@ -1466,6 +1583,70 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
               </>
             )}
 
+            {/* --- Eşya listesi --- */}
+            {tool === "furn" && !selItem && (
+              <>
+                <h3>Eşya</h3>
+                <div className="chips">
+                  {CATS.map((c) => (
+                    <button key={c} className={cat === c ? "on" : ""} onClick={() => setCat(c)}>
+                      {c}
+                    </button>
+                  ))}
+                </div>
+                <div className="catgrid">
+                  {[...CATALOG, ...custom].filter((c) => c.cat === cat).map((c) => (
+                    <button key={c.key} className={pick?.key === c.key ? "on" : ""} onClick={() => setPick(c)}>
+                      <b>{c.name}</b>
+                      <span>{Math.round(c.w * 100)} × {Math.round(c.d * 100)} cm</span>
+                    </button>
+                  ))}
+                  {cat === "Özel" && custom.length === 0 && <div className="muted small">Henüz özel eşyan yok. Aşağıdan ekle.</div>}
+                </div>
+                <h4>Özel eşya ekle (kendi ölçünle)</h4>
+                <label className="edge"><span>Ad</span><input value={cust.name} placeholder="Örn. Dolap" onChange={(e) => setCust({ ...cust, name: e.target.value })} /></label>
+                <div className="row3">
+                  <label>Genişlik (cm)<input inputMode="decimal" value={cust.w} onChange={(e) => setCust({ ...cust, w: e.target.value })} /></label>
+                  <label>Derinlik (cm)<input inputMode="decimal" value={cust.d} onChange={(e) => setCust({ ...cust, d: e.target.value })} /></label>
+                  <label>Yükseklik (cm)<input inputMode="decimal" value={cust.h} onChange={(e) => setCust({ ...cust, h: e.target.value })} /></label>
+                </div>
+                <label className="edge"><span>Renk</span><input type="color" value={cust.color} onChange={(e) => setCust({ ...cust, color: e.target.value })} /></label>
+                <button className="primary" onClick={addCustom}>Listeye ekle ve seç</button>
+                {pick && (
+                  <div className="muted small">Seçili: <b>{pick.name}</b>. Yerleştirmek için plana dokun. Bitirince Esc veya başka bir araç seç.</div>
+                )}
+              </>
+            )}
+
+            {/* --- Eşya özellikleri --- */}
+            {tool !== "plot" && selItem && (
+              <>
+                <h3>{selItem.name}</h3>
+                <label className="edge">
+                  <span>Ad</span>
+                  <input value={selItem.name} onChange={(e) => patchItem(selItem.id, (q) => ({ ...q, name: e.target.value }))} />
+                </label>
+                <NumField key={selItem.id + ":w:" + selItem.w} label="Genişlik (cm)" value={selItem.w * 100} decimals={0}
+                  onCommit={(v) => patchItem(selItem.id, (q) => ({ ...q, w: round3(Math.max(0.05, Math.min(20, v / 100))) }))} />
+                <NumField key={selItem.id + ":d:" + selItem.d} label="Derinlik (cm)" value={selItem.d * 100} decimals={0}
+                  onCommit={(v) => patchItem(selItem.id, (q) => ({ ...q, d: round3(Math.max(0.05, Math.min(20, v / 100))) }))} />
+                <NumField key={selItem.id + ":h:" + selItem.h} label="Yükseklik (cm)" value={selItem.h * 100} decimals={0}
+                  onCommit={(v) => patchItem(selItem.id, (q) => ({ ...q, h: round3(Math.max(0.01, Math.min(5, v / 100))) }))} />
+                <NumField key={selItem.id + ":r:" + selItem.rot} label="Açı (derece)" value={selItem.rot || 0.0001} decimals={0}
+                  onCommit={(v) => patchItem(selItem.id, (q) => ({ ...q, rot: ((Math.round(v) % 360) + 360) % 360 }))} />
+                <label className="edge">
+                  <span>Renk</span>
+                  <input type="color" value={selItem.color} onChange={(e) => patchItem(selItem.id, (q) => ({ ...q, color: e.target.value }))} />
+                </label>
+                <div className="row">
+                  <button onClick={() => patchItem(selItem.id, (q) => ({ ...q, rot: (q.rot + 90) % 360 }))}>↻ 90° döndür</button>
+                  <button onClick={() => dupItem(selItem)}>Çoğalt</button>
+                </div>
+                <div className="muted small">Eşyayı sürükleyerek taşı.</div>
+                <button className="danger" onClick={deleteSel}>Eşyayı sil</button>
+              </>
+            )}
+
             {/* --- Merdiven --- */}
             {tool !== "plot" && selStair && (
               <>
@@ -1550,7 +1731,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
             )}
 
             {/* --- Genel --- */}
-            {tool !== "plot" && tool !== "roof" && !selWall && !selOp && !selRoom && !selStair && (
+            {tool !== "plot" && tool !== "roof" && tool !== "furn" && !selWall && !selOp && !selRoom && !selStair && !selItem && (
               <>
                 <h3>{data.name}</h3>
                 <label className="edge">
@@ -1570,7 +1751,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
                 <NumField key={"dt" + data.defT} label="Yeni duvar kalınlığı (cm)" value={data.defT * 100} decimals={0}
                   onCommit={(v) => apply({ ...data, defT: round3(Math.max(0.05, Math.min(1.5, v / 100))) })} />
                 <div className="muted small">
-                  {walls.length} duvar · {openings.filter((o) => o.kind === "door").length} kapı · {openings.filter((o) => o.kind === "window").length} pencere · {rooms.length} oda
+                  {walls.length} duvar · {openings.filter((o) => o.kind === "door").length} kapı · {openings.filter((o) => o.kind === "window").length} pencere · {rooms.length} oda · {items.length} eşya
                 </div>
                 {tool === "select" && walls.length === 0 && <div className="muted small">Başlamak için “Duvar” aracını seç.</div>}
               </>

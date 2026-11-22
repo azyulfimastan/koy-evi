@@ -85,3 +85,12 @@ input, select { border: 1px solid var(--line); border-radius: 8px; padding: 8px 
 .floors { background: #efe9d6; }
 .floors button.on { background: #2a2a24; border-color: #2a2a24; color: #fff; }
 .floors button.add { border-style: dashed; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chips button { padding: 5px 9px; font-size: 13px; }
+.chips button.on, .catgrid button.on { background: var(--green); border-color: var(--green); color: #fff; }
+.catgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.catgrid button { display: flex; flex-direction: column; text-align: left; gap: 2px; padding: 7px 9px; font-size: 13px; }
+.catgrid button span { font-size: 11px; opacity: .7; }
+.row3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.row3 label { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--muted); }
+.row3 input { width: 100%; padding: 6px; }
