@@ -12,13 +12,15 @@ import { VERSION } from "./App";
 import dynamic from "next/dynamic";
 import { totalHeight, type V3 } from "@/lib/scene3d";
 import { EXT_TEX, FLOOR_DEFAULT, FLOOR_TEX, INT_TEX, ROOF_TEX, SWATCHES } from "@/lib/textures";
-import type { Finish } from "@/lib/types";
+import type { Finish, EnvKind, EnvObj } from "@/lib/types";
+import { ENV_KINDS, MONTHS, compassName, drawEnv, newEnv, sunPos } from "@/lib/env";
+import type { Pick3, Walk } from "./View3D";
 
 const View3D = dynamic(() => import("./View3D"), { ssr: false, loading: () => <div className="v3 v3load">3D hazırlanıyor…</div> });
 
 type View = { s: number; ox: number; oy: number };
 type Saved = "saved" | "saving" | "error";
-type Tool = "select" | "plot" | "wall" | "door" | "window" | "room" | "furn" | "stair" | "roof";
+type Tool = "select" | "plot" | "wall" | "door" | "window" | "room" | "furn" | "env" | "stair" | "roof";
 type Sel =
   | null
   | { k: "pv"; i: number }
@@ -26,7 +28,8 @@ type Sel =
   | { k: "op"; id: string }
   | { k: "room"; id: string }
   | { k: "stair"; id: string }
-  | { k: "item"; id: string };
+  | { k: "item"; id: string }
+  | { k: "env"; id: string };
 
 const cloneF = (d: FullData): FullData => JSON.parse(JSON.stringify(d));
 const ROOM_COLORS = ["#f2d9a6", "#bfe0c4", "#c9d9f0", "#f0c9c9", "#e4d0f0", "#f0e6a8"];
@@ -40,6 +43,7 @@ const TOOL_HINT: Record<Tool, string> = {
   door: "Kapı koymak istediğin duvara dokun.",
   window: "Pencere koymak istediğin duvara dokun.",
   room: "Duvarlarla kapalı bir alanın içine dokun, oda otomatik oluşur.",
+  env: "Listeden ağaç, yol, komşu bina gibi bir nesne seç, sonra arsada yerleştireceğin noktaya dokun.",
   furn: "Listeden bir eşya seç, sonra odada yerleştireceğin noktaya dokun.",
   stair: "Merdivenin yerleşeceği noktaya dokun. Basamak sayısı kat yüksekliğinden hesaplanır.",
   roof: "Çatı türünü ve eğimini panelden ayarla. Taslak, en üst katın dış sınırına göre çizilir.",
@@ -59,10 +63,20 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
   const [chain, setChain] = useState<Pt | null>(null);
   const [note, setNote] = useState("");
   const [pick, setPick] = useState<CatItem | null>(null);
+  const [envPick, setEnvPick] = useState<EnvKind | null>(null);
+  const envPickRef = useRef(envPick);
+  envPickRef.current = envPick;
+  const [walk, setWalk] = useState<Walk>(null);
+  const [pan3, setPan3] = useState(false);
+  const [pick3, setPick3] = useState<Pick3 | null>(null);
+  const [playing, setPlaying] = useState(false);
+  const [walkRoom, setWalkRoom] = useState("center");
   const [is3d, setIs3d] = useState(false);
   const is3dRef = useRef(is3d);
   is3dRef.current = is3d;
   const [v3, setV3] = useState<V3>({ floors: "all", roof: true, items: true, cut: false });
+  const inWalk = !!walk;
+  const v3eff = useMemo<V3>(() => (inWalk ? { ...v3, cut: false, floors: "all" } : v3), [v3, inWalk]);
   const [cat, setCat] = useState(CATS[0]);
   const [cust, setCust] = useState({ name: "", w: "100", d: "60", h: "75", color: "#d9d3b8" });
   const [saved, setSaved] = useState<Saved>("saved");
@@ -93,7 +107,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
   const selRef = useRef(sel);
   selRef.current = sel;
 
-  const { plot, walls, openings, rooms, stairs, items, custom } = data;
+  const { plot, walls, openings, rooms, stairs, items, custom, env } = data;
   const pickRef = useRef(pick);
   pickRef.current = pick;
 
@@ -431,6 +445,12 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
       g.setLineDash([]);
     }
 
+    // çevre nesneleri (ağaç, yol, komşu bina...)
+    for (const o of [...env.objs].sort((a, b) => (a.kind === "road" ? 0 : 1) - (b.kind === "road" ? 0 : 1))) drawEnv(g, o, s, ox, oy, { selected: sel?.k === "env" && sel.id === o.id });
+    if (tool === "env" && envPick && hover) {
+      const k = ENV_KINDS.find((q) => q.kind === envPick)!;
+      drawEnv(g, { kind: k.kind, x: hover.x, y: hover.y, rot: 0, w: k.w, d: k.d, color: k.color, name: k.name }, s, ox, oy, { ghost: true });
+    }
     // oda dolguları
     for (const r of rooms) {
       const cvs = roomCanvases.get(r.id);
@@ -773,6 +793,35 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
       }
     }
 
+    // pusula (kuzey oku)
+    {
+      const cx = W - 36;
+      const cy = H - 40;
+      g.save();
+      g.translate(cx, cy);
+      g.fillStyle = "rgba(255,255,255,0.85)";
+      g.strokeStyle = "#8a8574";
+      g.lineWidth = 1;
+      g.beginPath();
+      g.arc(0, 0, 24, 0, Math.PI * 2);
+      g.fill();
+      g.stroke();
+      g.rotate((env.sun.north * Math.PI) / 180);
+      g.fillStyle = "#b3392b";
+      g.beginPath();
+      g.moveTo(0, -19);
+      g.lineTo(6, 4);
+      g.lineTo(0, 0);
+      g.lineTo(-6, 4);
+      g.closePath();
+      g.fill();
+      g.fillStyle = "#2a2a24";
+      g.font = "700 11px system-ui";
+      g.textAlign = "center";
+      g.textBaseline = "middle";
+      g.fillText("K", 0, 14);
+      g.restore();
+    }
     // ölçek çubuğu
     const nice = [0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500];
     const m = nice.find((n) => n * s >= 80) ?? 500;
@@ -792,7 +841,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
     g.textBaseline = "bottom";
     g.fillText(m >= 1 ? `${m} m` : `${m * 100} cm`, bx + 4, by - 6);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, full, fi, view, sel, hover, chain, tool, pick, regions, roomCanvases, joins]);
+  }, [data, full, fi, view, sel, hover, chain, tool, pick, envPick, regions, roomCanvases, joins]);
 
   useEffect(() => {
     draw();
@@ -814,6 +863,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
     | { kind: "wend"; id: string; which: "a" | "b"; from: Pt; before: FullData }
     | { kind: "wmove"; id: string; start: Pt; a0: Pt; b0: Pt; before: FullData; moved: boolean }
     | { kind: "op"; id: string; before: FullData; moved: boolean }
+    | { kind: "emove"; id: string; start: Pt; x0: number; y0: number; before: FullData; moved: boolean }
     | { kind: "imove"; id: string; start: Pt; x0: number; y0: number; before: FullData; moved: boolean }
     | { kind: "smove"; id: string; start: Pt; x0: number; y0: number; before: FullData; moved: boolean }
     | { kind: "pinch"; d: number; s: number; cx: number; cy: number };
@@ -964,6 +1014,30 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
       return;
     }
 
+    if (t === "env") {
+      drag.current = pan(() => {
+        const cur = dataRef.current;
+        const pk = envPickRef.current;
+        const wp = toWorld(p.x, p.y);
+        if (!pk) {
+          const hit = [...cur.env.objs].reverse().find((o) => {
+            const lp = itemLocal(o, wp);
+            return Math.abs(lp.x) <= Math.max(o.w, 0.3) / 2 && Math.abs(lp.y) <= Math.max(o.d, 0.3) / 2;
+          });
+          if (hit) {
+            setSel({ k: "env", id: hit.id });
+            setTool("select");
+          } else setNote("Önce listeden bir nesne seç.");
+          return;
+        }
+        const pos = sn(wp);
+        const o = newEnv(pk, pos.x, pos.y, uid());
+        apply({ ...cur, env: { ...cur.env, objs: [...cur.env.objs, o] } });
+        setSel({ k: "env", id: o.id });
+      });
+      return;
+    }
+
     if (t === "furn") {
       drag.current = pan(() => {
         const cur = dataRef.current;
@@ -1084,6 +1158,17 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
         break;
       }
     }
+    if (!hitRoom) {
+      for (let i = d.env.objs.length - 1; i >= 0; i--) {
+        const o = d.env.objs[i];
+        const lp = itemLocal(o, w);
+        if (Math.abs(lp.x) <= Math.max(o.w, 0.3) / 2 && Math.abs(lp.y) <= Math.max(o.d, 0.3) / 2) {
+          setSel({ k: "env", id: o.id });
+          drag.current = { kind: "emove", id: o.id, start: w, x0: o.x, y0: o.y, before: cloneFull(), moved: false };
+          return;
+        }
+      }
+    }
     drag.current = pan(() => setSel(hitRoom ? { k: "room", id: hitRoom.id } : null));
   }
 
@@ -1097,7 +1182,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
       if (t === "wall") setHover(snapWall(wpt, chainRef.current));
       else if (t === "plot" && !dataRef.current.plot.closed) setHover(sn(wpt));
       else if (t === "door" || t === "window") setHover(wpt);
-      else if (t === "stair" || t === "furn") setHover(sn(wpt));
+      else if (t === "stair" || t === "furn" || t === "env") setHover(sn(wpt));
     };
     if (!d) {
       updateHover();
@@ -1167,6 +1252,14 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
         return nw;
       });
       setData({ ...cur, walls: walls2 });
+    } else if (d.kind === "emove") {
+      const cur = dataRef.current;
+      const dx = wpt.x - d.start.x;
+      const dy = wpt.y - d.start.y;
+      if (!d.moved && Math.hypot(dx, dy) * viewRef.current.s < 6) return;
+      d.moved = true;
+      const np = sn({ x: d.x0 + dx, y: d.y0 + dy });
+      setData({ ...cur, env: { ...cur.env, objs: cur.env.objs.map((q) => (q.id === d.id ? { ...q, x: np.x, y: np.y } : q)) } });
     } else if (d.kind === "imove") {
       const cur = dataRef.current;
       const dx = wpt.x - d.start.x;
@@ -1206,6 +1299,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
     if (d.kind === "wmove" && !d.moved) return;
     if (d.kind === "smove" && !d.moved) return;
     if (d.kind === "imove" && !d.moved) return;
+    if (d.kind === "emove" && !d.moved) return;
     if (d.kind === "op" && !d.moved) return;
     if (JSON.stringify(fullRef.current) !== JSON.stringify(d.before)) commit(d.before);
   }
@@ -1246,6 +1340,8 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
       apply({ ...d, stairs: d.stairs.filter((q) => q.id !== s.id) });
     } else if (s.k === "item") {
       apply({ ...d, items: d.items.filter((q) => q.id !== s.id) });
+    } else if (s.k === "env") {
+      apply({ ...d, env: { ...d.env, objs: d.env.objs.filter((q) => q.id !== s.id) } });
     }
     setSel(null);
   }
@@ -1256,6 +1352,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
     setHover(null);
     if (t !== "select") setSel(null);
     if (t !== "furn") setPick(null);
+    if (t !== "env") setEnvPick(null);
   }
   const patchWall = (id: string, f: (w: Wall) => Wall) => apply({ ...dataRef.current, walls: dataRef.current.walls.map((w) => (w.id === id ? f(w) : w)) });
   const patchOp = (id: string, f: (o: Opening) => Opening) => apply({ ...dataRef.current, openings: dataRef.current.openings.map((o) => (o.id === id ? f(o) : o)) });
@@ -1317,6 +1414,66 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
     const copy = f.floors[i - 1].walls.map((w) => ({ ...w, id: uid(), a: { ...w.a }, b: { ...w.b } }));
     setFull({ ...f, floors: f.floors.map((fl, k) => (k === i ? { ...fl, walls: [...fl.walls, ...copy] } : fl)) });
   }
+  const patchEnv = (id: string, f: (o: EnvObj) => EnvObj) => apply({ ...dataRef.current, env: { ...dataRef.current.env, objs: dataRef.current.env.objs.map((q) => (q.id === id ? f(q) : q)) } });
+  function dupEnv(o: EnvObj) {
+    const n: EnvObj = { ...o, id: uid(), x: round3(o.x + 1), y: round3(o.y + 1) };
+    apply({ ...dataRef.current, env: { ...dataRef.current.env, objs: [...dataRef.current.env.objs, n] } });
+    setSel({ k: "env", id: n.id });
+  }
+  /** Güneş ayarı: geri alma listesine yazılmaz */
+  const setSun = (p: Partial<typeof env.sun>) => setFull({ ...fullRef.current, env: { ...fullRef.current.env, sun: { ...fullRef.current.env.sun, ...p } } });
+  /** Başka bir kattaki öğeyi de değiştirebilen genel düzenleme (3D'de seçilenler için) */
+  const edit3d = (fn: (f: FullData) => FullData) => {
+    const f = fullRef.current;
+    commit(f);
+    setFull(fn(cloneF(f)));
+  };
+  function enterWalk(roomId: string) {
+    const f = fullRef.current;
+    const i = fiRef.current;
+    const fl = f.floors[i];
+    let id2 = roomId;
+    if (id2 === "center" && fl.rooms.length) id2 = fl.rooms[0].id;
+    let x = 0;
+    let y = 0;
+    let ok = false;
+    if (id2 !== "center") {
+      const r = fl.rooms.find((q) => q.id === id2);
+      const reg = r ? regionAt(rasterize(fl.walls), r.seed) : null;
+      if (r && reg && !reg.open) {
+        const c = { x: reg.cx, y: reg.cy };
+        const q = inRegion(reg, c) ? c : r.seed;
+        x = q.x;
+        y = q.y;
+        ok = true;
+      }
+    }
+    if (!ok) {
+      const pts = fl.walls.flatMap((w) => [w.a, w.b]);
+      const src = pts.length ? pts : f.plot.points;
+      if (src.length) {
+        x = (Math.min(...src.map((q) => q.x)) + Math.max(...src.map((q) => q.x))) / 2;
+        y = (Math.min(...src.map((q) => q.y)) + Math.max(...src.map((q) => q.y))) / 2;
+      }
+    }
+    setPick3(null);
+    setWalk({ x, y, floor: i, yaw: 0 });
+  }
+  useEffect(() => {
+    if (walk && walk.floor !== fi) enterWalk("center");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fi]);
+  useEffect(() => {
+    if (!playing) return;
+    const t = setInterval(() => {
+      const s0 = fullRef.current.env.sun;
+      let h = s0.hour + 0.1;
+      if (h > 21) h = 5;
+      setFull({ ...fullRef.current, env: { ...fullRef.current.env, sun: { ...s0, hour: Math.round(h * 100) / 100 } } });
+    }, 150);
+    return () => clearInterval(t);
+  }, [playing]);
+  const selEnv = sel?.k === "env" ? env.objs.find((q) => q.id === sel.id) : undefined;
   const setFin = (p: Partial<Finish>) => apply({ ...dataRef.current, fin: { ...dataRef.current.fin, ...p } });
   const patchRoom = (id: string, f: (r: Room) => Room) => apply({ ...dataRef.current, rooms: dataRef.current.rooms.map((r) => (r.id === id ? f(r) : r)) });
 
@@ -1337,7 +1494,8 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
         setSel(null);
         setChain(null);
         chainFirst.current = null;
-        if (pickRef.current) setPick(null);
+        if (envPickRef.current) setEnvPick(null);
+        else if (pickRef.current) setPick(null);
         else if (toolRef.current !== "plot") setTool("select");
       }
     };
@@ -1380,6 +1538,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
     ["window", "Pencere"],
     ["room", "Oda"],
     ["furn", "Eşya"],
+    ["env", "Çevre"],
     ["stair", "Merdiven"],
     ["roof", "Çatı"],
   ];
@@ -1400,7 +1559,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
           </button>
         ))}
         {!is3d && <button className="add" onClick={addFloor}>+ Kat</button>}
-        <button className={"v3btn" + (is3d ? " on" : "")} onClick={() => { setIs3d((v) => !v); setSel(null); setChain(null); }}>
+        <button className={"v3btn" + (is3d ? " on" : "")} onClick={() => { setIs3d((v) => !v); setSel(null); setChain(null); setWalk(null); setPick3(null); setPlaying(false); }}>
           {is3d ? "◧ 2D plana dön" : "🧊 3D görünüm"}
         </button>
       </div>
@@ -1434,7 +1593,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
       </>)}
 
       <div className="stage">
-        {is3d && <View3D full={full} fi={fi} v3={v3} name={name} />}
+        {is3d && <View3D full={full} fi={fi} v3={v3eff} name={name} walk={walk} pan={pan3} sel={pick3} onPick={setPick3} onExit={() => setWalk(null)} />}
         <div className="cv" ref={wrap} style={is3d ? { display: "none" } : undefined}>
           <canvas
             ref={cv}
@@ -1460,22 +1619,153 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
           <aside className="side">
             {is3d ? (
               <>
-                <h3>3D görünüm</h3>
-                <label className="edge">
-                  <span>Katlar</span>
-                  <select value={v3.floors} onChange={(e) => setV3({ ...v3, floors: e.target.value as V3["floors"] })}>
-                    <option value="all">Tüm katlar</option>
-                    <option value="upto">{full.floors[fi]?.name}’e kadar</option>
-                    <option value="only">Yalnız {full.floors[fi]?.name}</option>
-                  </select>
-                </label>
-                <label className="chk"><input type="checkbox" checked={v3.cut} onChange={(e) => setV3({ ...v3, cut: e.target.checked })} /> Kesit: seçili katın içini gör</label>
-                <label className="chk"><input type="checkbox" checked={v3.roof} disabled={v3.cut} onChange={(e) => setV3({ ...v3, roof: e.target.checked })} /> Çatıyı göster</label>
-                <label className="chk"><input type="checkbox" checked={v3.items} onChange={(e) => setV3({ ...v3, items: e.target.checked })} /> Eşyaları göster</label>
-                <div className="stats">
-                  <div><span>Kat sayısı</span><b>{full.floors.length}</b></div>
-                  <div><span>Toplam yükseklik</span><b>{fmt(totalHeight(full), 2)} m</b></div>
-                </div>
+                <h3>{walk ? "İç mekan" : "3D görünüm"}</h3>
+                {(() => {
+                  const fl = full.floors[fi];
+                  const closed = fl?.rooms ?? [];
+                  return (
+                    <>
+                      <label className="edge">
+                        <span>{walk ? "Odaya git" : "Odaya gir"}</span>
+                        <select value={walkRoom} onChange={(e) => setWalkRoom(e.target.value)}>
+                          {closed.map((r) => (<option key={r.id} value={r.id}>{r.name}</option>))}
+                          <option value="center">Evin ortası</option>
+                        </select>
+                      </label>
+                      <div className="row">
+                        <button className="primary" onClick={() => enterWalk(walkRoom)}>{walk ? "🚶 Git" : "🚶 İçeri gir (360°)"}</button>
+                        {walk && <button onClick={() => setWalk(null)}>Dışarı çık</button>}
+                      </div>
+                    </>
+                  );
+                })()}
+                {walk && <div className="muted small">{full.floors[walk.floor]?.name} içindesin. Etrafına bakmak için sürükle (360°), yürümek için ▲▼◀▶ düğmeleri veya W A S D. Kat değiştirmek için üstteki kat düğmelerine dokun.</div>}
+
+                {/* 3B'de seçilen nesne: rengini / kaplamasını değiştir */}
+                {(() => {
+                  if (!pick3) return <div className="muted small">Bir duvara, zemine, eşyaya, çatıya veya ağaca dokun; rengini burada değiştirirsin.</div>;
+                  if (pick3.k === "wall") {
+                    const w = full.floors[pick3.floor]?.walls.find((q) => q.id === pick3.id);
+                    if (!w) return null;
+                    const face = pick3.face === "int" ? "int" : "ext";
+                    const col = face === "int" ? (w.int ?? full.fin.intColor) : (w.ext ?? full.fin.extColor);
+                    const L = Math.hypot(w.b.x - w.a.x, w.b.y - w.a.y);
+                    const setW = (c: string | undefined) => edit3d((f) => ({ ...f, floors: f.floors.map((fl, i) => (i === pick3.floor ? { ...fl, walls: fl.walls.map((q) => (q.id === w.id ? (face === "int" ? { ...q, int: c } : { ...q, ext: c }) : q)) } : fl)) }));
+                    return (
+                      <div className="pk">
+                        <h4>Seçilen: duvar, {face === "int" ? "iç yüz" : "dış yüz"} ({fmt(L)} m)</h4>
+                        <MatRow label="Bu yüzün rengi" color={col} onColor={(c) => setW(c)} />
+                        {(face === "int" ? w.int : w.ext) && <button onClick={() => setW(undefined)}>Genel renge dön</button>}
+                      </div>
+                    );
+                  }
+                  if (pick3.k === "room") {
+                    const r = full.floors[pick3.floor]?.rooms.find((q) => q.id === pick3.id);
+                    if (!r) return null;
+                    const setR = (fn: (x: Room) => Room) => edit3d((f) => ({ ...f, floors: f.floors.map((fl, i) => (i === pick3.floor ? { ...fl, rooms: fl.rooms.map((q) => (q.id === r.id ? fn(q) : q)) } : fl)) }));
+                    return (
+                      <div className="pk">
+                        <h4>Seçilen: {r.name} zemini</h4>
+                        <label className="edge">
+                          <span>Kaplama</span>
+                          <select value={r.floor ?? "none"} onChange={(e) => setR((q) => ({ ...q, floor: e.target.value === "none" ? undefined : e.target.value, floorColor: undefined }))}>
+                            {FLOOR_TEX.map(([k, l]) => (<option key={k} value={k}>{l}</option>))}
+                          </select>
+                        </label>
+                        {r.floor && r.floor !== "none" && <MatRow label="Kaplama rengi" color={r.floorColor ?? FLOOR_DEFAULT[r.floor] ?? "#cccccc"} onColor={(c) => setR((q) => ({ ...q, floorColor: c }))} />}
+                      </div>
+                    );
+                  }
+                  if (pick3.k === "item") {
+                    const it = full.floors[pick3.floor]?.items.find((q) => q.id === pick3.id);
+                    if (!it) return null;
+                    const setI = (fn: (x: Item) => Item) => edit3d((f) => ({ ...f, floors: f.floors.map((fl, i) => (i === pick3.floor ? { ...fl, items: fl.items.map((q) => (q.id === it.id ? fn(q) : q)) } : fl)) }));
+                    return (
+                      <div className="pk">
+                        <h4>Seçilen: {it.name}</h4>
+                        <MatRow label="Renk" color={it.color} onColor={(c) => setI((q) => ({ ...q, color: c }))} />
+                        <div className="row">
+                          <button onClick={() => setI((q) => ({ ...q, rot: (q.rot + 90) % 360 }))}>↻ 90° döndür</button>
+                          <button className="danger" onClick={() => { edit3d((f) => ({ ...f, floors: f.floors.map((fl, i) => (i === pick3.floor ? { ...fl, items: fl.items.filter((q) => q.id !== it.id) } : fl)) })); setPick3(null); }}>Sil</button>
+                        </div>
+                      </div>
+                    );
+                  }
+                  if (pick3.k === "roof") {
+                    return (
+                      <div className="pk">
+                        <h4>Seçilen: çatı</h4>
+                        <MatRow label="Çatı" color={full.roof.color} tex={full.roof.tex} opts={ROOF_TEX}
+                          onColor={(c) => edit3d((f) => ({ ...f, roof: { ...f.roof, color: c } }))}
+                          onTex={(t) => edit3d((f) => ({ ...f, roof: { ...f.roof, tex: t } }))} />
+                      </div>
+                    );
+                  }
+                  const eo = full.env.objs.find((q) => q.id === pick3.id);
+                  if (!eo) return null;
+                  return (
+                    <div className="pk">
+                      <h4>Seçilen: {eo.name}</h4>
+                      <MatRow label="Renk" color={eo.color} onColor={(c) => edit3d((f) => ({ ...f, env: { ...f.env, objs: f.env.objs.map((q) => (q.id === eo.id ? { ...q, color: c } : q)) } }))} />
+                      <button className="danger" onClick={() => { edit3d((f) => ({ ...f, env: { ...f.env, objs: f.env.objs.filter((q) => q.id !== eo.id) } })); setPick3(null); }}>Sil</button>
+                    </div>
+                  );
+                })()}
+
+                <h4>Güneş ve gölge</h4>
+                {(() => {
+                  const sp = sunPos(env.sun);
+                  const hh = Math.floor(env.sun.hour);
+                  const mm = Math.round((env.sun.hour - hh) * 60);
+                  return (
+                    <>
+                      <label className="chk"><input type="checkbox" checked={env.sun.shadows} onChange={(e) => setSun({ shadows: e.target.checked })} /> Gölgeleri göster</label>
+                      <label className="edge">
+                        <span>Ay</span>
+                        <select value={env.sun.month} onChange={(e) => setSun({ month: parseInt(e.target.value) })}>
+                          {MONTHS.map((m, i) => (<option key={m} value={i + 1}>{m}</option>))}
+                        </select>
+                      </label>
+                      <label className="rng">
+                        <span>Saat: {String(hh).padStart(2, "0")}:{String(mm).padStart(2, "0")}</span>
+                        <input type="range" min={0} max={24} step={0.25} value={env.sun.hour} onChange={(e) => setSun({ hour: parseFloat(e.target.value) })} />
+                      </label>
+                      <button onClick={() => setPlaying((v) => !v)}>{playing ? "⏸ Durdur" : "▶ Gün boyu oynat"}</button>
+                      <label className="rng">
+                        <span>Kuzey yönü: {Math.round(env.sun.north)}°</span>
+                        <input type="range" min={0} max={359} step={1} value={env.sun.north} onChange={(e) => setSun({ north: parseFloat(e.target.value) })} />
+                      </label>
+                      <NumField key={"lat" + env.sun.lat} label="Enlem (°)" value={env.sun.lat} decimals={1} onCommit={(v) => setSun({ lat: Math.min(80, v) })} />
+                      <div className="stats">
+                        <div><span>Güneş yüksekliği</span><b>{sp.alt > 0 ? Math.round(sp.alt) + "°" : "Gece"}</b></div>
+                        <div><span>Güneşin yönü</span><b>{sp.alt > 0 ? compassName(sp.az) + " (" + Math.round(sp.az) + "°)" : "–"}</b></div>
+                      </div>
+                      <div className="muted small">Planın üst kenarı kuzey sayılır. Arsanın kuzeyi başka yöndeyse “Kuzey yönü” ile çevir; 2D plandaki pusula da döner. Enlem: Polonya için yaklaşık 50–54.</div>
+                    </>
+                  );
+                })()}
+
+                {!walk && (
+                  <>
+                    <h4>Görünüm</h4>
+                    <label className="edge">
+                      <span>Katlar</span>
+                      <select value={v3.floors} onChange={(e) => setV3({ ...v3, floors: e.target.value as V3["floors"] })}>
+                        <option value="all">Tüm katlar</option>
+                        <option value="upto">{full.floors[fi]?.name}’e kadar</option>
+                        <option value="only">Yalnız {full.floors[fi]?.name}</option>
+                      </select>
+                    </label>
+                    <label className="chk"><input type="checkbox" checked={v3.cut} onChange={(e) => setV3({ ...v3, cut: e.target.checked })} /> Kesit: seçili katın içini gör</label>
+                    <label className="chk"><input type="checkbox" checked={v3.roof} disabled={v3.cut} onChange={(e) => setV3({ ...v3, roof: e.target.checked })} /> Çatıyı göster</label>
+                    <label className="chk"><input type="checkbox" checked={v3.items} onChange={(e) => setV3({ ...v3, items: e.target.checked })} /> Eşyaları göster</label>
+                    <label className="chk"><input type="checkbox" checked={pan3} onChange={(e) => setPan3(e.target.checked)} /> Tek parmakla kaydır (telefon)</label>
+                    <div className="stats">
+                      <div><span>Kat sayısı</span><b>{full.floors.length}</b></div>
+                      <div><span>Toplam yükseklik</span><b>{fmt(totalHeight(full), 2)} m</b></div>
+                    </div>
+                  </>
+                )}
                 <h4>Malzeme ve renkler</h4>
                 <MatRow label="Dış duvar" color={full.fin.extColor} tex={full.fin.extTex} opts={EXT_TEX}
                   onColor={(c) => setFin({ extColor: c })} onTex={(t) => setFin({ extTex: t })} />
@@ -1488,11 +1778,8 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
                 <MatRow label="Pencere çerçevesi" color={full.fin.frameColor} onColor={(c) => setFin({ frameColor: c })} />
                 <MatRow label="Bahçe zemini" color={full.fin.groundColor} onColor={(c) => setFin({ groundColor: c })} />
                 <div className="muted small">
-                  Tek duvarın iç/dış rengini ve odanın zemin kaplamasını 2D planda o duvara / odaya dokunarak değiştir.
-                </div>
-                <div className="muted small">
-                  Döndür: sürükle (tek parmak). Yakınlaştır: tekerlek / iki parmak. Kaydır: sağ tık veya iki parmakla sürükle.
-                  Kat seçmek için üstteki kat düğmelerini kullan.
+                  Fare: sol veya orta tuşa basılı tutup sürükle = 360° döndür · sağ tuş = kaydır · tekerlek = yakınlaştır.
+                  Telefon: tek parmak = döndür · iki parmak = yakınlaştır ve döndür.
                 </div>
                 {full.floors.every((fl) => !fl.walls.length) && <div className="muted small">Henüz duvar yok. 2D planda duvar çizince ev burada görünür.</div>}
               </>
@@ -1729,6 +2016,53 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
               </>
             )}
 
+            {/* --- Çevre listesi --- */}
+            {tool === "env" && !selEnv && (
+              <>
+                <h3>Çevre nesneleri</h3>
+                <div className="catgrid">
+                  {ENV_KINDS.map((k) => (
+                    <button key={k.kind} className={envPick === k.kind ? "on" : ""} onClick={() => setEnvPick(k.kind)}>
+                      <b>{k.name}</b>
+                      <span>{k.w} × {k.d} m</span>
+                    </button>
+                  ))}
+                </div>
+                {envPick ? (
+                  <div className="muted small">Seçili: <b>{ENV_KINDS.find((q) => q.kind === envPick)?.name}</b>. Yerleştirmek için plana dokun. Bitirince Esc veya başka bir araç seç.</div>
+                ) : (
+                  <div className="muted small">Arsanın dışına da koyabilirsin (yol, komşu bina). Yerleştirdikten sonra boyutunu ve rengini değiştirebilirsin.</div>
+                )}
+                <div className="muted small">{env.objs.length} çevre nesnesi var.</div>
+              </>
+            )}
+
+            {/* --- Çevre nesnesi özellikleri --- */}
+            {tool !== "plot" && selEnv && (
+              <>
+                <h3>{selEnv.name}</h3>
+                <label className="edge">
+                  <span>Ad</span>
+                  <input value={selEnv.name} onChange={(e) => patchEnv(selEnv.id, (q) => ({ ...q, name: e.target.value }))} />
+                </label>
+                <NumField key={selEnv.id + ":w:" + selEnv.w} label="Genişlik (m)" value={selEnv.w} onCommit={(v) => patchEnv(selEnv.id, (q) => ({ ...q, w: round3(Math.min(200, v)) }))} />
+                <NumField key={selEnv.id + ":d:" + selEnv.d} label="Derinlik (m)" value={selEnv.d} onCommit={(v) => patchEnv(selEnv.id, (q) => ({ ...q, d: round3(Math.min(200, v)) }))} />
+                <NumField key={selEnv.id + ":h:" + selEnv.h} label="Yükseklik (m)" value={selEnv.h} onCommit={(v) => patchEnv(selEnv.id, (q) => ({ ...q, h: round3(Math.min(50, v)) }))} />
+                <NumField key={selEnv.id + ":r:" + selEnv.rot} label="Açı (derece)" value={selEnv.rot || 0.0001} decimals={0}
+                  onCommit={(v) => patchEnv(selEnv.id, (q) => ({ ...q, rot: ((Math.round(v) % 360) + 360) % 360 }))} />
+                <label className="edge">
+                  <span>Renk</span>
+                  <input type="color" value={selEnv.color} onChange={(e) => patchEnv(selEnv.id, (q) => ({ ...q, color: e.target.value }))} />
+                </label>
+                <div className="row">
+                  <button onClick={() => patchEnv(selEnv.id, (q) => ({ ...q, rot: (q.rot + 90) % 360 }))}>↻ 90° döndür</button>
+                  <button onClick={() => dupEnv(selEnv)}>Çoğalt</button>
+                </div>
+                <div className="muted small">Nesneyi sürükleyerek taşı.</div>
+                <button className="danger" onClick={deleteSel}>Nesneyi sil</button>
+              </>
+            )}
+
             {/* --- Merdiven --- */}
             {tool !== "plot" && selStair && (
               <>
@@ -1819,7 +2153,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
             )}
 
             {/* --- Genel --- */}
-            {tool !== "plot" && tool !== "roof" && tool !== "furn" && !selWall && !selOp && !selRoom && !selStair && !selItem && (
+            {tool !== "plot" && tool !== "roof" && tool !== "furn" && tool !== "env" && !selWall && !selOp && !selRoom && !selStair && !selItem && !selEnv && (
               <>
                 <h3>{data.name}</h3>
                 <label className="edge">

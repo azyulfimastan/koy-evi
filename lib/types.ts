@@ -26,6 +26,13 @@ export type Stair = {
 export type Shape = "rect" | "round" | "bed" | "sofa" | "chair" | "cooker" | "sink" | "toilet" | "tub" | "shower" | "rug" | "stove" | "wardrobe";
 export type CatItem = { key: string; name: string; cat: string; w: number; d: number; h: number; shape: Shape; color: string; elev?: number };
 export type Item = { id: string; key: string; name: string; shape: Shape; x: number; y: number; rot: number; w: number; d: number; h: number; elev: number; color: string };
+export type EnvKind = "tree" | "pine" | "bush" | "road" | "building" | "fence";
+/** Arsa çevresindeki nesneler (ağaç, yol, komşu bina...). w: x yönü, d: y yönü, h: yükseklik (m) */
+export type EnvObj = { id: string; kind: EnvKind; name: string; x: number; y: number; rot: number; w: number; d: number; h: number; color: string };
+export type Sun = { month: number; hour: number; lat: number; north: number; shadows: boolean };
+export type Env = { sun: Sun; objs: EnvObj[] };
+export const defaultEnv = (): Env => ({ sun: { month: 6, hour: 14, lat: 52, north: 0, shadows: true }, objs: [] });
+
 export type Floor = {
   id: string;
   name: string;
@@ -55,7 +62,7 @@ export type Finish = {
   groundColor: string;
 };
 export const defaultFinish = (): Finish => ({ extColor: "#e9e1d3", extTex: "plain", intColor: "#f4f0e8", intTex: "plain", doorColor: "#8a5a36", frameColor: "#f7f7f4", groundColor: "#93b565" });
-export type FullData = { plot: Plot; snap: number; defT: number; roof: Roof; floors: Floor[]; custom: CatItem[]; fin: Finish };
+export type FullData = { plot: Plot; snap: number; defT: number; roof: Roof; floors: Floor[]; custom: CatItem[]; fin: Finish; env: Env };
 
 /** Editörün o an çalıştığı kat + ortak ayarlar (düz görünüm) */
 export type PlanData = {
@@ -64,6 +71,7 @@ export type PlanData = {
   defT: number;
   roof: Roof;
   fin: Finish;
+  env: Env;
   name: string;
   height: number;
   walls: Wall[];
@@ -82,7 +90,7 @@ export const defaultRoof = (): Roof => ({ kind: "gable", pitch: 35, overhang: 0.
 export const newFloor = (name: string): Floor => ({ id: uid(), name, height: 2.8, walls: [], openings: [], rooms: [], stairs: [], items: [] });
 
 export function defaultFull(): FullData {
-  return { plot: { points: [], closed: false }, snap: 0.1, defT: 0.25, roof: defaultRoof(), floors: [newFloor("Zemin kat")], custom: [], fin: defaultFinish() };
+  return { plot: { points: [], closed: false }, snap: 0.1, defT: 0.25, roof: defaultRoof(), floors: [newFloor("Zemin kat")], custom: [], fin: defaultFinish(), env: defaultEnv() };
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -112,6 +120,7 @@ export function normalizeFull(d: any): FullData {
     floors,
     custom: Array.isArray(d.custom) ? d.custom : [],
     fin: { ...defaultFinish(), ...(d.fin ?? {}) },
+    env: { sun: { ...defaultEnv().sun, ...(d.env?.sun ?? {}) }, objs: Array.isArray(d.env?.objs) ? d.env.objs : [] },
   };
 }
 
@@ -123,6 +132,7 @@ export function flatten(f: FullData, i: number): PlanData {
     defT: f.defT,
     roof: f.roof,
     fin: f.fin,
+    env: f.env,
     name: fl.name,
     height: fl.height,
     walls: fl.walls,
@@ -138,5 +148,5 @@ export function unflatten(f: FullData, i: number, d: PlanData): FullData {
   const floors = f.floors.map((fl, k) =>
     k === i ? { ...fl, name: d.name, height: d.height, walls: d.walls, openings: d.openings, rooms: d.rooms, stairs: d.stairs, items: d.items } : fl
   );
-  return { plot: d.plot, snap: d.snap, defT: d.defT, roof: d.roof, floors, custom: d.custom, fin: d.fin };
+  return { plot: d.plot, snap: d.snap, defT: d.defT, roof: d.roof, floors, custom: d.custom, fin: d.fin, env: d.env };
 }

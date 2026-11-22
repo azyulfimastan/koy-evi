@@ -112,3 +112,18 @@ input, select { border: 1px solid var(--line); border-radius: 8px; padding: 8px 
 .sw button.on { outline: 2px solid var(--green); outline-offset: 1px; }
 input[type=color] { height: 30px; width: 56px; padding: 2px; cursor: pointer; border-radius: 8px; }
 .edge input[type=color] { width: 56px; padding: 2px; }
+.compass { position: absolute; right: 10px; top: 10px; width: 46px; height: 46px; border-radius: 50%; background: rgba(255,255,255,.9); border: 1px solid #0003; z-index: 2; pointer-events: none; }
+.compass .needle { position: absolute; inset: 0; display: flex; align-items: flex-start; justify-content: center; }
+.compass .needle::after { content: ""; position: absolute; top: 5px; left: 50%; margin-left: -5px; border: 5px solid transparent; border-bottom: 18px solid #b3392b; border-top: 0; }
+.compass .needle span { position: absolute; bottom: 4px; font-size: 11px; font-weight: 700; color: #2a2a24; }
+.v3bar .exit { background: #b3392b; color: #fff; border-color: #b3392b; }
+.pad { position: absolute; bottom: 16px; z-index: 3; display: grid; gap: 6px; touch-action: none; user-select: none; }
+.padl { left: 14px; grid-template-columns: repeat(3, 54px); grid-template-rows: repeat(2, 54px); }
+.padl .up { grid-column: 2; grid-row: 1; } .padl .lf { grid-column: 1; grid-row: 2; } .padl .dn { grid-column: 2; grid-row: 2; } .padl .rt { grid-column: 3; grid-row: 2; }
+.padr { right: 14px; grid-template-columns: repeat(2, 54px); }
+.pad button { width: 54px; height: 54px; border-radius: 14px; font-size: 22px; padding: 0; background: rgba(255,255,255,.88); border: 1px solid #0003; touch-action: none; }
+.pad button:active { background: #fff; transform: scale(.96); }
+.rng { display: flex; flex-direction: column; gap: 4px; font-size: 14px; }
+.rng input { width: 100%; }
+.pk { border: 2px solid #ff8a1f; border-radius: 10px; padding: 8px 10px; background: #fff7ee; display: flex; flex-direction: column; gap: 6px; }
+.pk h4 { margin: 0; color: #8a4b0b; }
