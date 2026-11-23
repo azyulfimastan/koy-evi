@@ -69,6 +69,11 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
   const [walkRoom, setWalkRoom] = useState("center");
   const [is3d, setIs3d] = useState(false);
   const [live3, setLive3] = useState(false);
+  // Çift/üç tıkla tam ekran: hangi panel tam ekran (null = normal)
+  const [fs, setFs] = useState<null | "plan" | "live" | "main3d">(null);
+  const fsRef = useRef(fs);
+  fsRef.current = fs;
+  const mt = useRef<{ zone: string; up: number; x: number; y: number; n: number; ok: boolean; snap: { full: FullData; pl: number; chain: Pt | null } | null }>({ zone: "", up: 0, x: 0, y: 0, n: 0, ok: false, snap: null });
   const live3First = useRef(true);
   const [showRep, setShowRep] = useState(false);
   const [showBak, setShowBak] = useState(false);
@@ -1100,6 +1105,59 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
     }
   }
 
+  // ---------- çift / üç tıkla tam ekran ----------
+  function fsZone(t: EventTarget | null): "plan" | "live" | "main3d" | null {
+    const el = t as HTMLElement | null;
+    if (!el || !el.closest) return null;
+    if (el.closest("button,input,select,textarea,aside,.pad,.lenbox,.floatbtn,.h3handle,.v3bar,.fsback")) return null;
+    if (el.closest(".live3")) return "live";
+    if (el.closest(".cv")) return "plan";
+    if (el.closest(".v3")) return "main3d";
+    return null;
+  }
+  function stageDownCap(e: React.PointerEvent) {
+    if (!e.isPrimary) return;
+    const z = fsZone(e.target);
+    const m = mt.current;
+    const now = e.nativeEvent.timeStamp; // olayın gerçek zamanı (ağır 3B çizim yavaşlatsa da doğru)
+    if (!z) {
+      m.n = 0;
+      return;
+    }
+    const near = Math.hypot(e.clientX - m.x, e.clientY - m.y) < 30;
+    const lt = lastTap.current;
+    if (m.n >= 1 && m.zone === z && m.ok && near && now - m.up < 450 && !(lt && now - lt.t < 450)) {
+      if (m.n === 1) {
+        // ikinci tık: tam ekranı aç/kapat; ilk tıkın çizime etkisini geri al
+        if (z === "plan" && m.snap && (past.current.length !== m.snap.pl || chainRef.current !== m.snap.chain)) {
+          past.current.length = Math.min(past.current.length, m.snap.pl);
+          setFull(m.snap.full);
+          setChain(m.snap.chain);
+          setSel(null);
+        }
+        setFs(fsRef.current ? null : z);
+      }
+      m.n += 1; // 3. tık da yutulur, nokta eklemez
+      m.up = now;
+      if (z === "plan") e.stopPropagation();
+      return;
+    }
+    m.zone = z;
+    m.n = 1;
+    m.ok = true;
+    m.x = e.clientX;
+    m.y = e.clientY;
+    m.up = now;
+    m.snap = { full: cloneF(fullRef.current), pl: past.current.length, chain: chainRef.current };
+  }
+  function stageMoveCap(e: React.PointerEvent) {
+    const m = mt.current;
+    if (m.ok && m.n === 1 && Math.hypot(e.clientX - m.x, e.clientY - m.y) > 12) m.ok = false;
+  }
+  function stageUpCap(e: React.PointerEvent) {
+    mt.current.up = e.nativeEvent.timeStamp;
+  }
+
   function onUp(e: React.PointerEvent) {
     const d = drag.current;
     ptrs.current.delete(e.pointerId);
@@ -1364,6 +1422,8 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
       } else if (toolRef.current === "wall" && chainRef.current && /^[0-9.,]$/.test(e.key) && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
         openLenDraw(e.key);
+      } else if (e.key === "Escape" && fsRef.current) {
+        setFs(null);
       } else if (e.key === "Escape") {
         setLenEdit(null);
         setSel(null);
@@ -1560,7 +1620,8 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
         />
       )}
       {showRep && <Report full={full} name={name} onClose={() => setShowRep(false)} onPrices={(pr) => setFull((f) => ({ ...f, prices: pr }))} />}
-      <div className="stage">
+      <div className={"stage" + (fs ? " fs fs-" + fs : "")} onPointerDownCapture={stageDownCap} onPointerMoveCapture={stageMoveCap} onPointerUpCapture={stageUpCap}>
+        {fs && <button className="fsback" onClick={() => setFs(null)} aria-label="Tam ekrandan çık">⤡ Geri dön</button>}
         {is3d && <View3D full={full} fi={fi} v3={v3eff} name={name} walk={walk} pan={pan3} sel={pick3} onPick={setPick3} onExit={() => setWalk(null)} onWallH={onWallH} secPos={secPos} secFlip={secFlip} cmd={cmd3} />}
         {!is3d && live3 && (
           <div className="live3" aria-label="Canlı 3D önizleme">

@@ -450,3 +450,12 @@ button.ghost { border-color: transparent; background: transparent; font-size: 17
 }
 .live3 .v3bar { flex-wrap: wrap; max-width: calc(100% - 70px); }
 .live3 .v3bar button:nth-last-child(-n+3) { display: none; }
+
+/* çift / üç tıkla tam ekran */
+.stage.fs { position: fixed; inset: 0; z-index: 60; background: var(--bg, #fff); flex-direction: row; }
+.stage.fs > .side { display: none; }
+.stage.fs-plan > .live3 { display: none; }
+.stage.fs-live > .cv { display: none; }
+.stage.fs-live > .live3 { flex: 1; border: 0; order: 0; }
+.fsback { position: absolute; left: 50%; transform: translateX(-50%); bottom: 14px; z-index: 70; background: #1f5a4c; color: #fff; border: 2px solid #fff; border-radius: 10px; padding: 8px 14px; font-size: 15px; font-weight: 600; box-shadow: 0 2px 10px rgba(0,0,0,.35); }
+@media (max-width: 760px) { .stage.fs { flex-direction: column; } }
