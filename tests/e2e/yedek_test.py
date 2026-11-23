@@ -12,7 +12,7 @@ def run(p, name, vp, mobile):
     pg.goto(BASE); pg.fill("input[type=password]",PW); pg.click("button.primary"); pg.wait_for_selector(".page")
     out={}
     nm=f"Şablon testi {name}"
-    pg.fill(".newp input", nm); pg.click(".tpl:has-text('Küçük köy evi')")
+    pg.fill(".newp input", nm); pg.click(".tpl >> nth=1")
     pg.screenshot(path=f"{OUT}{tag}-{name}-list-tpl.png")
     pg.click(".newp button.primary"); pg.wait_for_selector(".cv canvas"); pg.wait_for_timeout(1200)
     out["info"]=pg.locator(".info, .stats, .muted:has-text('duvar')").first.inner_text() if pg.locator(".info, .stats, .muted:has-text('duvar')").count() else ""

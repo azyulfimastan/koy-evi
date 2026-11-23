@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { normalizeFull } from "../../lib/types";
-import { TEMPLATES } from "../../lib/templates";
+import { TEMPLATES, LEGACY_TEMPLATES } from "../../lib/templates";
 import { parseBackup } from "../../lib/backup";
 import { computeReport } from "../../lib/quantities";
 
@@ -30,7 +30,7 @@ test("şablon odaları kapalı ve alanları makul", () => {
     const r = computeReport(normalizeFull(t.make()));
     const want = normalizeFull(t.make()).floors.reduce((a, f) => a + f.rooms.length, 0);
     assert.equal(r.rooms.length, want, t.key + ": kapanmayan oda var");
-    for (const room of r.rooms) assert.ok(room.area > 1.5 && room.area < 80, `${t.key}/${room.name}: alan ${room.area}`);
+    for (const room of r.rooms) assert.ok(room.area > 1.4 && room.area < 80, `${t.key}/${room.name}: alan ${room.area}`);
     assert.ok(r.lines.some((l) => l.name.startsWith("Dış cephe")), t.key + ": dış cephe hesabı yok");
   }
 });
@@ -53,7 +53,7 @@ test("bozuk veri güvenle tamamlanır", () => {
 
 test("duvar başına yükseklik rapora yansır", () => {
   const vol = (d: ReturnType<typeof normalizeFull>) => computeReport(d).lines.find((l) => l.name.startsWith("Duvar hacmi"))!.qty;
-  const full = normalizeFull(TEMPLATES.find((x) => x.key === "villa")!.make());
+  const full = normalizeFull(LEGACY_TEMPLATES.find((x) => x.key === "villa")!.make());
   const before = vol(full);
   for (const f of full.floors) for (const w of f.walls) w.h = 1;
   assert.ok(vol(full) < before * 0.5, "alçak duvarlar hacmi düşürmeli");

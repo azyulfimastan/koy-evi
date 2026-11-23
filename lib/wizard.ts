@@ -3,7 +3,7 @@ import { normalizeFull, defaultBuild } from "./types";
 import { placeExtStair } from "./stairs";
 
 /* Sihirbaz: girilen rakamlardan (oda, kat, balkon, çatı) otomatik ev üretir. */
-export type RoomType = "salon" | "salonmutfak" | "mutfak" | "yatak" | "cocuk" | "banyo" | "wc" | "calisma" | "depo";
+export type RoomType = "salon" | "salonmutfak" | "mutfak" | "yatak" | "cocuk" | "banyo" | "wc" | "calisma" | "depo" | "sundurma" | "kisbahcesi" | "caybahcesi" | "garaj";
 export type WRoom = { id: string; type: RoomType; w: number; d: number; band?: "S" | "N"; block?: number; turn?: 0 | 1 | 2 | 3 /* eşya yönü: 0 normal, 1 yatay ayna, 2 dikey ayna, 3 ikisi (180°) */ };
 export type WBalcony = { id: string; floor: number; side: "N" | "E" | "S" | "W"; w: number; d: number };
 export type Side = "N" | "E" | "S" | "W";
@@ -40,6 +40,10 @@ export const RT: Record<RoomType, { name: string; color: string; floor: string; 
   banyo: { name: "Banyo", color: "#cde6f2", floor: "fayans", front: 4, w: 2.2, d: 2.5 },
   wc: { name: "WC", color: "#cde6f2", floor: "fayans", front: 4, w: 1.2, d: 1.8 },
   depo: { name: "Depo", color: "#e4ddcf", floor: "plain", front: 5, w: 2, d: 2 },
+  sundurma: { name: "Sundurma", color: "#e6dcc6", floor: "concrete", front: 0, w: 6, d: 3.5 },
+  kisbahcesi: { name: "Kış bahçesi", color: "#d3ead0", floor: "fayans", front: 1, w: 4, d: 4 },
+  caybahcesi: { name: "Çay bahçesi", color: "#e3efc9", floor: "fayans", front: 1, w: 4, d: 4 },
+  garaj: { name: "Garaj", color: "#d7d5d0", floor: "concrete", front: 5, w: 3.5, d: 6 },
 };
 
 let n = 0;
@@ -259,9 +263,18 @@ export function generate(s: WSpec): WResult {
     };
     // blok dış kenarları: komşu blokla ortak kısım yalnız bir kez (iç duvar), kalanı dış duvar
     const pieces = new Map<string, Piece[]>();
+    /** hücrenin bloğun bir cephesi boyunca kapladığı aralık (cephenin saat yönündeki başlangıcından) */
+    const cellRange = (c: Cell, side: Side): [number, number] | null => {
+      const blk = blocks[c.b];
+      if (side === "N") return Math.abs(c.y0 - blk.y) > 0.01 ? null : [c.x0 - blk.x, c.x1 - blk.x];
+      if (side === "S") return Math.abs(c.y1 - (blk.y + blk.d)) > 0.01 ? null : [blk.x + blk.w - c.x1, blk.x + blk.w - c.x0];
+      if (side === "E") return Math.abs(c.x1 - (blk.x + blk.w)) > 0.01 ? null : [c.y0 - blk.y, c.y1 - blk.y];
+      return Math.abs(c.x0 - blk.x) > 0.01 ? null : [blk.y + blk.d - c.y1, blk.y + blk.d - c.y0];
+    };
     blocks.forEach((blk, bi) => {
       for (const side of SIDES) {
         const e = edgeOf(blk, side);
+        const porch = cells.filter((c) => c.b === bi && c.type === "sundurma").map((c) => cellRange(c, side)).filter((r): r is [number, number] => !!r);
         const cuts: { a: number; b: number; own: boolean }[] = [];
         blocks.forEach((o, oi) => {
           if (oi === bi) return;
@@ -276,7 +289,7 @@ export function generate(s: WSpec): WResult {
           const ea = eOf(blk, side, p1), eb = eOf(blk, side, p2);
           cuts.push({ a: Math.min(ea, eb), b: Math.max(ea, eb), own: bi < oi });
         });
-        const bps = [0, e.len, ...cuts.flatMap((c) => [c.a, c.b])].filter((v) => v >= -0.001 && v <= e.len + 0.001).sort((a, b) => a - b);
+        const bps = [0, e.len, ...cuts.flatMap((c) => [c.a, c.b]), ...porch.flatMap((r) => [r[0], r[1]])].filter((v) => v >= -0.001 && v <= e.len + 0.001).sort((a, b) => a - b);
         const list: Piece[] = [];
         for (let k = 0; k + 1 < bps.length; k++) {
           const a = bps[k], b = bps[k + 1];
@@ -285,6 +298,7 @@ export function generate(s: WSpec): WResult {
           const cut = cuts.find((c) => mid >= c.a && mid <= c.b);
           if (cut && !cut.own) continue; // diğer blok çizer
           const wl = mk(e.ax + e.dx * a, e.ay + e.dy * a, e.ax + e.dx * b, e.ay + e.dy * b, cut ? Ts : T);
+          if (!cut && porch.some((r) => mid >= r[0] && mid <= r[1])) wl.h = 1.1; // sundurma: alçak korkuluk duvarı
           list.push({ e0: a, e1: b, wall: wl, ext: !cut });
         }
         pieces.set(`${bi}${side}`, list);
@@ -375,8 +389,9 @@ export function generate(s: WSpec): WResult {
     // giriş kapısı (zemin kat)
     type Ent = { side: Side; wall: Wall; pos: number; cell: Cell };
     let entrance: Ent | null = null;
-    if (fi === 0) {
-      const cand = [hubCell, ...cells.filter((c) => c.b === 0 && c !== hubCell), ...cells.filter((c) => c.b !== 0)];
+    const hasPorch = cells.some((c) => c.type === "sundurma");
+    if (fi === 0 && !hasPorch) {
+      const cand = [hubCell, ...cells.filter((c) => c.b === 0 && c !== hubCell), ...cells.filter((c) => c.b !== 0)].filter((c) => c.type !== "garaj" && c.type !== "sundurma");
       outer: for (const c of cand) {
         const ex = cellExt(c);
         for (const sd of ["S", "E", "W", "N"] as Side[]) {
@@ -409,16 +424,25 @@ export function generate(s: WSpec): WResult {
     for (const c of cells) {
       const wet = c.type === "banyo" || c.type === "wc" || c.type === "depo";
       if (c.type === "hol" && fi === 0) continue;
+      if (c.type === "sundurma") continue; // alçak duvar, pencere yok
+      if (c.type === "garaj") {
+        const ex = cellExt(c).sort((a, b) => b.hi - b.lo - (a.hi - a.lo));
+        const hit = ex.find((e) => e.hi - e.lo >= 2.8);
+        if (hit) { const pos = O(hit.pc.wall, posIn(hit.pc, (hit.lo + hit.hi) / 2), 2.6, 2.2, 0, "door"); reserved.push({ wall: hit.pc.wall.id, pos, half: 1.4 }); }
+        else warnings.push("Garaj için en az 2,8 m'lik dış duvar bulunamadı, garaj kapısı konamadı.");
+        continue;
+      }
+      const glass = c.type === "kisbahcesi" || c.type === "caybahcesi";
       for (const e of cellExt(c)) {
         const L = e.hi - e.lo;
-        const n = L > 5 ? 2 : 1;
+        const n = glass ? (L > 3.2 ? 2 : 1) : L > 5 ? 2 : 1;
         for (let k = 0; k < n; k++) {
           const frac = n === 1 ? 0.5 : (k + 1) / 3;
           const pos = posIn(e.pc, e.lo + frac * L);
-          const ww = wet ? 0.6 : Math.min(1.3, L - 0.8);
+          const ww = wet ? 0.6 : glass ? Math.min(2.0, L / n - 0.4) : Math.min(1.3, L - 0.8);
           if (ww < 0.5) continue;
           if (reserved.some((r) => r.wall === e.pc.wall.id && Math.abs(r.pos - pos) < r.half + ww / 2 + 0.1)) continue;
-          O(e.pc.wall, pos, ww, wet ? 0.6 : 1.4, wet ? 1.5 : 0.9, "window");
+          O(e.pc.wall, pos, ww, wet ? 0.6 : glass ? 2.0 : 1.4, wet ? 1.5 : glass ? 0.2 : 0.9, "window");
         }
       }
     }
@@ -470,6 +494,25 @@ export function generate(s: WSpec): WResult {
           }
         } else if (c.type === "wc") {
           I("wc", "Klozet", "toilet", cx, c.y1 - 0.45, 180, 0.4, 0.7, 0.8, "#f4f6f7");
+        } else if (c.type === "garaj") {
+          if (cw >= 2.4 && cd >= 4.2) I("car", "Araba", "rect", cx, (c.y0 + c.y1) / 2, 0, 1.9, 4.5, 1.5, "#7a8c9a");
+          else if (cw >= 4.2 && cd >= 2.4) I("car", "Araba", "rect", (c.x0 + c.x1) / 2, (c.y0 + c.y1) / 2, 90, 1.9, 4.5, 1.5, "#7a8c9a");
+        } else if (c.type === "kisbahcesi") {
+          I("plant", "Saksı bitkisi", "round", c.x0 + 0.5, c.y0 + 0.5, 0, 0.5, 0.5, 1.4, "#4f8a3a");
+          I("plant", "Saksı bitkisi", "round", c.x1 - 0.5, c.y0 + 0.5, 0, 0.5, 0.5, 1.4, "#4f8a3a");
+          if (cw >= 2.6 && cd >= 2.6) { I("coffeeR", "Yuvarlak sehpa", "round", cx, (c.y0 + c.y1) / 2, 0, 0.7, 0.7, 0.45, "#8a6a4a"); I("arm", "Koltuk", "sofa", cx - 0.9, (c.y0 + c.y1) / 2, 90, 0.9, 0.9, 0.85, "#a8b89a"); I("arm", "Koltuk", "sofa", cx + 0.9, (c.y0 + c.y1) / 2, 270, 0.9, 0.9, 0.85, "#a8b89a"); }
+        } else if (c.type === "caybahcesi") {
+          if (cw >= 2.6 && cd >= 2.6) {
+            const my0 = (c.y0 + c.y1) / 2;
+            I("tableR", "Yuvarlak masa", "round", cx, my0, 0, 1.1, 1.1, 0.75, "#a07a52");
+            I("chair", "Sandalye", "chair", cx, my0 - 0.85, 0, 0.45, 0.45, 0.9, "#c9a46e");
+            I("chair", "Sandalye", "chair", cx, my0 + 0.85, 180, 0.45, 0.45, 0.9, "#c9a46e");
+            I("chair", "Sandalye", "chair", cx - 0.85, my0, 270, 0.45, 0.45, 0.9, "#c9a46e");
+            I("chair", "Sandalye", "chair", cx + 0.85, my0, 90, 0.45, 0.45, 0.9, "#c9a46e");
+          }
+          I("plant", "Saksı bitkisi", "round", c.x1 - 0.4, c.y0 + 0.4, 0, 0.5, 0.5, 1.4, "#4f8a3a");
+        } else if (c.type === "sundurma") {
+          if (cw >= 2.4 && cd >= 1.8) { I("bench", "Bank", "rect", cx - 0.8, c.y0 + 0.5, 0, 1.4, 0.4, 0.45, "#a07a52"); I("tableR", "Yuvarlak masa", "round", cx + 1.0, (c.y0 + c.y1) / 2, 0, 0.9, 0.9, 0.75, "#a07a52"); }
         }
         if (c.turn) {
           const mx2 = c.x0 + c.x1, my2 = c.y0 + c.y1;

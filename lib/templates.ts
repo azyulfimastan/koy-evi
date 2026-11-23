@@ -197,10 +197,16 @@ function cabin() {
   };
 }
 
-export const TEMPLATES: { key: string; name: string; desc: string; make: () => unknown }[] = [
-  { key: "empty", name: "Boş arsa", desc: "Sıfırdan kendin çiz", make: () => null },
+import { EXAMPLES } from "./exampleHouses";
+
+export const LEGACY_TEMPLATES: { key: string; name: string; desc: string; make: () => unknown }[] = [
   { key: "small", name: "Küçük köy evi", desc: "Tek kat · 2+1 · 9\u00a0×\u00a07\u00a0m", make: small },
   { key: "big", name: "İki katlı köy evi", desc: "2 kat · 4+1 · 10\u00a0×\u00a08\u00a0m", make: big },
   { key: "villa", name: "Süper iki katlı ev", desc: "2 kat · 4+1 · açık mutfak · 12\u00a0×\u00a09\u00a0m", make: villa },
   { key: "cabin", name: "Bağ evi", desc: "Tek oda + banyo · 6\u00a0×\u00a05\u00a0m", make: cabin },
+];
+
+export const TEMPLATES: { key: string; name: string; desc: string; make: () => unknown }[] = [
+  { key: "empty", name: "Boş arsa", desc: "Sıfırdan kendin çiz", make: () => null },
+  ...EXAMPLES,
 ];

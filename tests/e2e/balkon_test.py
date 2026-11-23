@@ -12,7 +12,7 @@ def run(w,h,sfx):
     pg=ctx.new_page(); errs=[]; pg.set_default_timeout(120000)
     pg.on("pageerror", lambda e: errs.append(str(e)))
     pg.goto(BASE); pg.fill("input[type=password]",PW); pg.click("button.primary"); pg.wait_for_selector(".page")
-    pg.fill(".newp input","Balkon "+sfx); pg.click(".tpl:has-text('Süper iki katlı')"); pg.click(".newp button.primary")
+    pg.fill(".newp input","Balkon "+sfx); pg.click(".tpl >> nth=1"); pg.click(".newp button.primary")
     pg.wait_for_selector(".cv canvas"); pg.wait_for_timeout(1000)
     pg.click(".floors >> text=1. kat"); pg.wait_for_timeout(600)
     pg.screenshot(path=f"{OUT}{tag}-{sfx}-01-plan-1kat.png")

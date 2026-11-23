@@ -11,7 +11,7 @@ with sync_playwright() as p:
     pg.on("pageerror", lambda e: errs.append(str(e)))
     pg.goto(BASE); pg.fill("input[type=password]",PW); pg.click("button.primary"); pg.wait_for_selector(".page")
     pg.screenshot(path=f"{OUT}{tag}-00-sablon-secimi.png")
-    pg.fill(".newp input", "Süper ev"); pg.click(".tpl:has-text('Süper iki katlı')"); pg.screenshot(path=f"{OUT}{tag}-00-sablon-secimi.png"); pg.click(".newp button.primary")
+    pg.fill(".newp input", "Süper ev"); pg.click(".tpl >> nth=1"); pg.screenshot(path=f"{OUT}{tag}-00-sablon-secimi.png"); pg.click(".newp button.primary")
     pg.wait_for_selector(".cv canvas"); pg.wait_for_timeout(1200)
     pg.screenshot(path=f"{OUT}{tag}-01-zemin-plan.png")
     pg.click(".floors >> text=1. kat"); pg.wait_for_timeout(700)

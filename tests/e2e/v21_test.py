@@ -12,7 +12,7 @@ def run(w,h,sfx):
     pg=ctx.new_page(); errs=[]; pg.set_default_timeout(90000)
     pg.on("pageerror", lambda e: errs.append(str(e)))
     pg.goto(BASE); pg.fill("input[type=password]",PW); pg.click("button.primary"); pg.wait_for_selector(".page")
-    pg.fill(".newp input","Alt "+sfx); pg.click(".tpl:has-text('Süper iki katlı')"); pg.click(".newp button.primary")
+    pg.fill(".newp input","Alt "+sfx); pg.click(".tpl >> nth=1"); pg.click(".newp button.primary")
     pg.wait_for_selector(".cv canvas"); pg.wait_for_timeout(1500)
     # Daha fazla
     res["daha_fazla_var"]= pg.locator(".tools.modes .more").count()>0
