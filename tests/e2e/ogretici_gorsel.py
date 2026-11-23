@@ -16,7 +16,7 @@ JS_ON = """([sel, text, pad, where]) => {
 JS_OFF = "() => document.querySelectorAll('.__hl').forEach(e=>e.remove())"
 with sync_playwright() as p:
     ctx=p.chromium.launch().new_context(viewport={"width":1280,"height":800})
-    ctx.add_init_script("localStorage.setItem('kte_guide','off');localStorage.setItem('kte_nothumb','1')")
+    ctx.add_init_script("localStorage.setItem('kte_guide','off');localStorage.setItem('kte_fold','open');localStorage.setItem('kte_nothumb','1')")
     pg=ctx.new_page(); errs=[]; pg.set_default_timeout(60000)
     pg.on("pageerror", lambda e: errs.append(str(e)))
     def shot(name, marks=()):

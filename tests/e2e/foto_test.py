@@ -10,7 +10,7 @@ OUT = os.environ.get("SHOTS", "tests/shots/")
 ARGS=["--use-angle=swiftshader","--enable-unsafe-swiftshader","--ignore-gpu-blocklist"]
 with sync_playwright() as p:
     ctx=p.chromium.launch(args=ARGS).new_context(viewport={"width":390,"height":844},has_touch=True,is_mobile=True,device_scale_factor=2) if phone else p.chromium.launch(args=ARGS).new_context(viewport={"width":1280,"height":800})
-    ctx.add_init_script(f"localStorage.setItem('kte_guide','off');localStorage.setItem('kte_nothumb','1');localStorage.setItem('kte_photo_res','{res}')")
+    ctx.add_init_script(f"localStorage.setItem('kte_guide','off');localStorage.setItem('kte_fold','open');localStorage.setItem('kte_nothumb','1');localStorage.setItem('kte_photo_res','{res}')")
     pg=ctx.new_page(); errs=[]; pg.set_default_timeout(600000)
     pg.on("pageerror", lambda e: errs.append(str(e)))
     pg.on("console", lambda m: errs.append(m.type+": "+m.text[:300]) if m.type in ("error",) else None)

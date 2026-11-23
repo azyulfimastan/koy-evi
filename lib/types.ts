@@ -23,6 +23,7 @@ export type Stair = {
   w: number; // basamak genişliği (m)
   mirror: boolean;
 };
+export type FamilyVote = { id: string; who: string; score: number; note: string };
 export type Balcony = {
   id: string;
   wall: string; // bağlı olduğu duvar
@@ -92,7 +93,7 @@ export type Finish = {
   baseTex?: string;
 };
 export const defaultFinish = (): Finish => ({ extColor: "#e9e1d3", extTex: "plain", intColor: "#f4f0e8", intTex: "plain", doorColor: "#8a5a36", frameColor: "#f7f7f4", groundColor: "#93b565" });
-export type FullData = { plot: Plot; snap: number; defT: number; roof: Roof; floors: Floor[]; custom: CatItem[]; fin: Finish; env: Env; build?: Build; prices?: Record<string, number> /* metraj fiyatları (TL/birim) */; terrain?: { slope: number; dir: number } /* arsa eğimi % ve alçalma yönü (derece, 0 = kuzey, saat yönü) */ };
+export type FullData = { plot: Plot; snap: number; defT: number; roof: Roof; floors: Floor[]; custom: CatItem[]; fin: Finish; env: Env; build?: Build; prices?: Record<string, number> /* metraj fiyatları (TL/birim) */; family?: { votes: FamilyVote[] }; terrain?: { slope: number; dir: number } /* arsa eğimi % ve alçalma yönü (derece, 0 = kuzey, saat yönü) */ };
 
 /** Editörün o an çalıştığı kat + ortak ayarlar (düz görünüm) */
 export type PlanData = {
@@ -157,6 +158,7 @@ export function normalizeFull(d: any): FullData {
     fin: { ...defaultFinish(), ...(d.fin ?? {}) },
     env: { sun: { ...defaultEnv().sun, ...(d.env?.sun ?? {}) }, objs: Array.isArray(d.env?.objs) ? d.env.objs : [] },
     build: { ...defaultBuild(), ...(d.build ?? {}) },
+    family: { votes: Array.isArray(d.family?.votes) ? d.family.votes.filter((v: any) => v && typeof v.who === "string").map((v: any) => ({ id: String(v.id ?? ""), who: String(v.who).slice(0, 40), score: Math.max(1, Math.min(5, Math.round(Number(v.score) || 3))), note: String(v.note ?? "").slice(0, 300) })) : [] },
     prices: d.prices && typeof d.prices === "object" ? d.prices : {},
     terrain: { slope: Number(d.terrain?.slope) || 0, dir: Number(d.terrain?.dir) || 0 },
   };

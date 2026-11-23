@@ -33,7 +33,7 @@ def big():
 
 def run(p, name, vp, mobile):
     ctx = p.chromium.launch(args=ARGS).new_context(viewport=vp, has_touch=mobile, is_mobile=mobile, device_scale_factor=2 if mobile else 1)
-    ctx.add_init_script("localStorage.setItem('kte_guide','off');localStorage.setItem('kte_nothumb','1')"); pg = ctx.new_page(); errs=[]
+    ctx.add_init_script("localStorage.setItem('kte_guide','off');localStorage.setItem('kte_fold','open');localStorage.setItem('kte_nothumb','1')"); pg = ctx.new_page(); errs=[]
     pg.on("pageerror", lambda e: errs.append(str(e)))
     pg.goto(BASE); pg.wait_for_selector("input[type=password]")
     pg.fill("input[type=password]", PW); pg.click("button.primary"); pg.wait_for_selector(".page")

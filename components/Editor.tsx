@@ -71,6 +71,13 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
   const [showBak, setShowBak] = useState(false);
   const [guideOpen, setGuideOpen] = useState(false);
   const [tourOpen, setTourOpen] = useState(false);
+  const [more, setMore] = useState(() => {
+    try {
+      return localStorage.getItem("kte_fold") === "open" || window.innerWidth >= 900; // geniş ekranda hepsi açık
+    } catch {
+      return true;
+    }
+  });
   const is3dRef = useRef(is3d);
   is3dRef.current = is3d;
   const [v3, setV3] = useState<V3>({ floors: "all", roof: true, items: true, sec: "none" });
@@ -1368,6 +1375,45 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
     return TOOL_HINT[tool];
   }
 
+  // 3D panelindeki başlıklar tıklanınca bölüm açılır / kapanır (telefonda varsayılan: sık kullanılmayanlar kapalı)
+  const foldState = useRef<Record<string, boolean>>({});
+  useEffect(() => {
+    if (!is3d) return;
+    const root = document.querySelector<HTMLElement>(".editor .side");
+    if (!root) return;
+    const phone = (() => { try { return window.innerWidth < 700 && localStorage.getItem("kte_fold") !== "open"; } catch { return false; } })();
+    const closedByDefault = (t: string) => phone && /Kesit|Kata tepeden|Güneş|Malzeme/.test(t);
+    const apply = () => {
+      let cur: HTMLElement | null = null;
+      for (const el of Array.from(root.children) as HTMLElement[]) {
+        if (el.tagName === "H4" && !el.textContent?.startsWith("Seçilen")) {
+          cur = el;
+          const key = el.textContent ?? "";
+          if (foldState.current[key] === undefined) foldState.current[key] = closedByDefault(key);
+          el.classList.add("foldh");
+          el.classList.toggle("closed", foldState.current[key]);
+          el.setAttribute("role", "button");
+          continue;
+        }
+        if (el.tagName === "H4" || el.tagName === "H3") { cur = null; el.classList.remove("fold-hide"); continue; }
+        el.classList.toggle("fold-hide", !!cur && foldState.current[cur.textContent ?? ""] === true);
+      }
+    };
+    apply();
+    const mo = new MutationObserver(() => { mo.disconnect(); apply(); mo.observe(root, { childList: true, subtree: false }); });
+    mo.observe(root, { childList: true });
+    const click = (e: Event) => {
+      const h = (e.target as HTMLElement).closest("h4.foldh") as HTMLElement | null;
+      if (!h) return;
+      const key = h.textContent ?? "";
+      foldState.current[key] = !foldState.current[key];
+      apply();
+    };
+    root.addEventListener("click", click);
+    return () => { mo.disconnect(); root.removeEventListener("click", click); };
+  });
+  const EXTRA_TOOLS: Tool[] = ["env", "build", "roof"];
+  const showMore = more || EXTRA_TOOLS.includes(tool);
   const modes: [Tool, string][] = [
     ["select", "Seç"],
     ["plot", "Arsa"],
@@ -1404,16 +1450,18 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
           {is3d ? <>◧ <span className="lg">2D plana dön</span><span className="sm">2D</span></> : <>🧊 <span className="lg">3D görünüm</span><span className="sm">3D</span></>}
         </button>
         <button className="v3btn rep" onClick={() => setShowRep(true)}>📋 Rapor</button>
-        <button className="v3btn gd" onClick={() => setGuideOpen(true)} title="Adım adım yönlendirme">🧭</button>
         <button className="v3btn gd tourbtn" onClick={() => { setTourOpen(true); setIs3d(false); }} title="Nasıl kullanılır? Adım adım demo">🎬</button>
       </div>
       {!is3d && (<>
       <div className="tools modes">
-        {modes.map(([t, l]) => (
+        {modes.filter(([t]) => !EXTRA_TOOLS.includes(t) || showMore).map(([t, l]) => (
           <button key={t} className={tool === t ? "on" : ""} onClick={() => chooseTool(t)}>
             {l}
           </button>
         ))}
+        {!(EXTRA_TOOLS.includes(tool) && showMore && more === false) && (
+          <button className="more" onClick={() => setMore((v) => !v)} aria-expanded={showMore}>{showMore ? "Daha az ▴" : "Daha fazla ▾"}</button>
+        )}
       </div>
       <div className="tools">
         <button onClick={undo} disabled={!past.current.length}>↶ Geri al</button>

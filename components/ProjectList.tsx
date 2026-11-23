@@ -3,6 +3,8 @@ import { useEffect, useRef, useState } from "react";
 import { VERSION } from "./App";
 import { HouseLogo } from "./HouseArt";
 import { TEMPLATES } from "@/lib/templates";
+import Summary from "./Summary";
+import Compare from "./Compare";
 import { downloadBackup, parseBackup, stamp } from "@/lib/backup";
 
 type Item = { id: string; name: string; updatedAt: number; thumb?: string };
@@ -28,6 +30,30 @@ export default function ProjectList({ onOpen, onLogout }: { onOpen: (id: string)
   const [trash, setTrash] = useState<Trash[] | null>(null);
   const [showTrash, setShowTrash] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const [sel, setSel] = useState<string[]>([]);
+  const [cmp, setCmp] = useState(false);
+  const [sumId, setSumId] = useState<string | null>(null);
+  const toggle = (id: string) => setSel((a) => (a.includes(id) ? a.filter((x) => x !== id) : a.length >= 4 ? a : [...a, id]));
+
+  async function duplicate(p: Item) {
+    setBusy("Kopyalanıyor…");
+    try {
+      const r = await fetch("/api/projects/" + p.id);
+      if (!r.ok) throw new Error();
+      const src = await r.json();
+      const base = p.name.replace(/\s*\(alternatif \d+\)$/, "");
+      const n = (items ?? []).filter((q) => q.name.startsWith(base)).length + 1;
+      const c = await fetch("/api/projects", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: `${base} (alternatif ${n})`, data: src.data }) });
+      if (!c.ok) throw new Error();
+      const np = await c.json();
+      if (src.thumb) await fetch("/api/projects/" + np.id, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ thumb: src.thumb }) });
+      setNote(`✅ Kopyalandı: ${np.name}. Şimdi onu açıp değiştirebilirsin.`);
+      load();
+    } catch {
+      setErr("Kopyalanamadı.");
+    }
+    setBusy("");
+  }
 
   async function loadTrash() {
     const r = await fetch("/api/trash");
@@ -157,6 +183,7 @@ export default function ProjectList({ onOpen, onLogout }: { onOpen: (id: string)
       <div className="grid">
         {items?.map((p) => (
           <div className="pcard" key={p.id}>
+            <input type="checkbox" className="psel" checked={sel.includes(p.id)} onChange={() => toggle(p.id)} aria-label={p.name + " karşılaştırmaya ekle"} />
             <button className="pthumb" onClick={() => onOpen(p.id)} aria-label={p.name + " projesini aç"}>
               {p.thumb ? (
                 // eslint-disable-next-line @next/next/no-img-element
@@ -182,9 +209,22 @@ export default function ProjectList({ onOpen, onLogout }: { onOpen: (id: string)
                 <button className="ghost" onClick={() => setConfirmDel(p.id)} aria-label="Sil">🗑</button>
               )}
             </div>
+            <div className="pactions">
+              <button onClick={() => duplicate(p)}>📋 Alternatif kopyala</button>
+              <button onClick={() => setSumId(p.id)}>📄 Özet</button>
+            </div>
           </div>
         ))}
       </div>
+
+      {items && items.length >= 2 && sel.length < 2 && <div className="muted small" style={{ margin: "6px 0" }}>Alternatifleri karşılaştırmak için evlerin köşesindeki kutuyu işaretle (en çok 4).</div>}
+      {sel.length >= 2 && (
+        <div className="cmpbar">
+          <button onClick={() => setCmp(true)}>⚖️ {sel.length} evi karşılaştır</button>
+        </div>
+      )}
+      {cmp && <Compare ids={sel} onClose={() => setCmp(false)} onSummary={(id) => { setCmp(false); setSumId(id); }} />}
+      {sumId && <Summary id={sumId} onClose={() => { setSumId(null); load(); }} />}
 
       {!!trash?.length && (
         <div className="trash">

@@ -6,7 +6,7 @@ OUT = os.environ.get("SHOTS", "tests/shots/")
 
 def run(p, name, vp, mobile):
     ctx = p.chromium.launch().new_context(viewport=vp, has_touch=mobile, is_mobile=mobile, device_scale_factor=2 if mobile else 1)
-    ctx.add_init_script("localStorage.setItem('kte_guide','off');localStorage.setItem('kte_nothumb','1')"); pg = ctx.new_page(); errs = []
+    ctx.add_init_script("localStorage.setItem('kte_guide','off');localStorage.setItem('kte_fold','open');localStorage.setItem('kte_nothumb','1')"); pg = ctx.new_page(); errs = []
     pg.on("pageerror", lambda e: errs.append(str(e)))
     pg.on("console", lambda m: errs.append(m.text) if m.type == "error" else None)
     pg.goto(BASE); pg.wait_for_selector("input[type=password]")

@@ -6,7 +6,7 @@ OUT = os.environ.get("SHOTS", "tests/shots/")
 ARGS=["--use-angle=swiftshader","--enable-unsafe-swiftshader","--ignore-gpu-blocklist"]
 with sync_playwright() as p:
     ctx=p.chromium.launch(args=ARGS).new_context(viewport={"width":1280,"height":800})
-    ctx.add_init_script("localStorage.setItem('kte_guide','off');localStorage.setItem('kte_nothumb','1')")
+    ctx.add_init_script("localStorage.setItem('kte_guide','off');localStorage.setItem('kte_fold','open');localStorage.setItem('kte_nothumb','1')")
     pg=ctx.new_page(); errs=[]; pg.set_default_timeout(120000)
     pg.on("pageerror", lambda e: errs.append(str(e)))
     pg.goto(BASE); pg.fill("input[type=password]",PW); pg.click("button.primary"); pg.wait_for_selector(".page")

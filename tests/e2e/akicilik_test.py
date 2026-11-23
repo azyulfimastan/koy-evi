@@ -8,7 +8,7 @@ FR = """() => { window.__fr=[]; let last=performance.now(); const f=(t)=>{ windo
 STOP = """() => { window.__frOn=false; const a=window.__fr.slice(2); a.sort((x,y)=>x-y); const avg=a.reduce((s,x)=>s+x,0)/Math.max(1,a.length); return {frames:a.length, ort_ms:Math.round(avg), p90_ms:Math.round(a[Math.floor(a.length*0.9)]||0), en_kotu_ms:Math.round(a[a.length-1]||0)} }"""
 with sync_playwright() as p:
     ctx=p.chromium.launch(args=ARGS).new_context(viewport={"width":1280,"height":800})
-    ctx.add_init_script("localStorage.setItem('kte_guide','off');localStorage.setItem('kte_nothumb','1')")
+    ctx.add_init_script("localStorage.setItem('kte_guide','off');localStorage.setItem('kte_fold','open');localStorage.setItem('kte_nothumb','1')")
     pg=ctx.new_page(); pg.set_default_timeout(120000)
     pg.goto(BASE); pg.fill("input[type=password]",PW); pg.click("button.primary"); pg.wait_for_selector(".page")
     pg.evaluate("""async (d)=>{const p=await (await fetch('/api/projects',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({name:'Akıcılık'})})).json();
