@@ -605,6 +605,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
     | { kind: "op"; id: string; before: FullData; moved: boolean }
     | { kind: "emove"; id: string; start: Pt; x0: number; y0: number; before: FullData; moved: boolean }
     | { kind: "imove"; id: string; start: Pt; x0: number; y0: number; before: FullData; moved: boolean }
+    | { kind: "bmove"; id: string; start: Pt; pos0: number; before: FullData; moved: boolean }
     | { kind: "smove"; id: string; start: Pt; x0: number; y0: number; before: FullData; moved: boolean }
     | { kind: "pinch"; d: number; s: number; cx: number; cy: number };
   const drag = useRef<Drag>(null);
@@ -885,6 +886,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
       const bw = d.walls.find((q) => q.id === b.wall);
       if (bw && inBalcony(bw, b, w)) {
         setSel({ k: "balcony", id: b.id });
+        drag.current = { kind: "bmove", id: b.id, start: w, pos0: b.pos, before: cloneFull(), moved: false };
         return;
       }
     }
@@ -1029,6 +1031,18 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
       d.moved = true;
       const np = sn({ x: d.x0 + dx, y: d.y0 + dy });
       setData({ ...cur, items: cur.items.map((q) => (q.id === d.id ? { ...q, x: np.x, y: np.y } : q)) });
+    } else if (d.kind === "bmove") {
+      const cur = dataRef.current;
+      const b = (cur.balconies ?? []).find((q) => q.id === d.id);
+      const bw = b && cur.walls.find((q) => q.id === b.wall);
+      if (!b || !bw) return;
+      const L = Math.hypot(bw.b.x - bw.a.x, bw.b.y - bw.a.y) || 1;
+      const ux = (bw.b.x - bw.a.x) / L, uy = (bw.b.y - bw.a.y) / L;
+      const along = (wpt.x - d.start.x) * ux + (wpt.y - d.start.y) * uy;
+      if (!d.moved && Math.abs(along) * viewRef.current.s < 6) return;
+      d.moved = true;
+      const np = round3(Math.max(b.w / 2, Math.min(L - b.w / 2, Math.round((d.pos0 + along) * 20) / 20)));
+      setData({ ...cur, balconies: (cur.balconies ?? []).map((q) => (q.id === d.id ? { ...q, pos: np } : q)) });
     } else if (d.kind === "smove") {
       const cur = dataRef.current;
       const dx = wpt.x - d.start.x;
@@ -1066,6 +1080,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
       } else lastTap.current = { id: d.id, t: now };
       return;
     }
+    if (d.kind === "bmove" && !d.moved) return;
     if (d.kind === "smove" && !d.moved) return;
     if (d.kind === "imove" && !d.moved) return;
     if (d.kind === "emove" && !d.moved) return;
@@ -1454,7 +1469,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
           onClose={() => setShowBak(false)}
         />
       )}
-      {showRep && <Report full={full} name={name} onClose={() => setShowRep(false)} />}
+      {showRep && <Report full={full} name={name} onClose={() => setShowRep(false)} onPrices={(pr) => setFull((f) => ({ ...f, prices: pr }))} />}
       <div className="stage">
         {is3d && <View3D full={full} fi={fi} v3={v3eff} name={name} walk={walk} pan={pan3} sel={pick3} onPick={setPick3} onExit={() => setWalk(null)} onWallH={onWallH} secPos={secPos} secFlip={secFlip} cmd={cmd3} />}
         <div className="cv" ref={wrap} style={is3d ? { display: "none" } : undefined}>
@@ -1765,6 +1780,16 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
                       <div><span>Alan</span><b>{fmt(area(plot.points))} m²</b></div>
                       <div><span>Çevre</span><b>{fmt(perimeter(plot.points, true))} m</b></div>
                     </div>
+                    <h4>Arsa eğimi</h4>
+                    <NumField key={"slope" + (full.terrain?.slope ?? 0)} label="Eğim (%)" value={full.terrain?.slope ?? 0} decimals={1}
+                      onCommit={(v) => edit3d((f) => ({ ...f, terrain: { slope: Math.max(0, Math.min(25, Math.round(v * 10) / 10)), dir: f.terrain?.dir ?? 0 } }))} />
+                    <label className="edge">
+                      <span>Alçalma yönü</span>
+                      <select value={full.terrain?.dir ?? 0} onChange={(e) => edit3d((f) => ({ ...f, terrain: { slope: f.terrain?.slope ?? 0, dir: +e.target.value } }))}>
+                        {[["Kuzeye doğru", 0], ["Kuzeydoğu", 45], ["Doğuya doğru", 90], ["Güneydoğu", 135], ["Güneye doğru", 180], ["Güneybatı", 225], ["Batıya doğru", 270], ["Kuzeybatı", 315]].map(([l, v]) => (<option key={v as number} value={v as number}>{l as string}</option>))}
+                      </select>
+                    </label>
+                    <div className="muted small">Eğim 3D'de görünür; ev en yüksek köşesinde zemine oturur, alçalan tarafta beton cokol çıkar ve metraja eklenir. 0 = düz arsa.</div>
                     <h4>Kenar uzunlukları (m)</h4>
                     <div className="edges">
                       {plot.points.map((p, i) => (
@@ -1849,6 +1874,19 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
             {tool !== "plot" && selOp && selOpWall && (
               <>
                 <h3>{selOp.kind === "door" ? "Kapı" : "Pencere"}</h3>
+                <div className="muted small">Hazır ölçüler</div>
+                <div className="chips seg">
+                  {(selOp.kind === "door"
+                    ? [["Tek kanat 90", 0.9, 2.1, 0, "rect"], ["Çift kanat 160", 1.6, 2.15, 0, "rect"], ["Giriş 100", 1.0, 2.2, 0, "rect"], ["Kemerli 100", 1.0, 2.3, 0, "arch"], ["Garaj 250", 2.5, 2.2, 0, "rect"], ["Balkon kapısı 150", 1.5, 2.2, 0, "rect"]]
+                    : [["Küçük 60", 0.6, 0.6, 1.5, "rect"], ["Standart 120", 1.2, 1.2, 0.9, "rect"], ["Geniş 180", 1.8, 1.3, 0.9, "rect"], ["Fransız 150", 1.5, 2.2, 0, "rect"], ["Kemerli 90", 0.9, 1.4, 0.9, "arch"], ["Yuvarlak 60", 0.6, 0.6, 1.5, "round"]]
+                  ).map(([l, w, h, sl, sh]) => (
+                    <button key={l as string} onClick={() => {
+                      const L = dist(selOpWall.a, selOpWall.b);
+                      const ww = Math.min(w as number, Math.max(0.3, L - 0.2));
+                      patchOp(selOp.id, (o) => ({ ...o, w: ww, h: h as number, sill: sl as number, shape: sh as Opening["shape"], pos: round3(Math.max(ww / 2 + 0.05, Math.min(L - ww / 2 - 0.05, o.pos))) }));
+                    }}>{l as string}</button>
+                  ))}
+                </div>
                 <NumField key={selOp.id + ":w:" + selOp.w} label="Genişlik (cm)" value={selOp.w * 100} decimals={0}
                   onCommit={(v) => {
                     const L = dist(selOpWall.a, selOpWall.b);

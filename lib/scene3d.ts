@@ -6,6 +6,7 @@ import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeom
 import { inRegion, rasterize, regionAt, wallGeom } from "./rooms";
 import { roofInfo } from "./roof";
 import { balconyRect } from "./balcony";
+import { terrainFn } from "./terrain";
 import type { Balcony } from "./types";
 import { stairBox, stairLocal, stairSteps, TREAD } from "./stairs";
 import { buildStages, floorCols, reached } from "./stages";
@@ -1418,6 +1419,7 @@ function grassMat(color: string) {
 }
 
 function buildGround(f: FullData, g: THREE.Group) {
+  const hf = terrainFn(f);
   const gc = f.fin.groundColor;
   const pts = f.plot.points;
   if (pts.length >= 3) {
@@ -1425,6 +1427,11 @@ function buildGround(f: FullData, g: THREE.Group) {
     const geo = new THREE.ShapeGeometry(s);
     geo.rotateX(-Math.PI / 2);
     geo.translate(0, -0.01, 0);
+    if (hf) {
+      const P0 = geo.attributes.position;
+      for (let i = 0; i < P0.count; i++) P0.setY(i, P0.getY(i) + hf(P0.getX(i), P0.getZ(i)));
+      geo.computeVertexNormals();
+    }
     // dünya UV: 1 doku = 4 m
     const pos = geo.attributes.position;
     const uv = new Float32Array(pos.count * 2);
@@ -1438,18 +1445,26 @@ function buildGround(f: FullData, g: THREE.Group) {
     mesh.receiveShadow = true;
     g.add(mesh);
     const line = new THREE.LineLoop(
-      new THREE.BufferGeometry().setFromPoints(pts.map((p) => V(p.x, 0.02, p.y))),
+      new THREE.BufferGeometry().setFromPoints(pts.map((p) => V(p.x, 0.02 + (hf ? hf(p.x, p.y) : 0), p.y))),
       new THREE.LineDashedMaterial({ color: "#4f7a33", dashSize: 0.4, gapSize: 0.25 })
     );
     line.computeLineDistances();
     g.add(line);
   }
-  const bigGeo = new THREE.PlaneGeometry(1200, 1200);
+  const bigGeo = new THREE.PlaneGeometry(1200, 1200, hf ? 60 : 1, hf ? 60 : 1);
   const buv = bigGeo.attributes.uv;
   for (let i = 0; i < buv.count; i++) buv.setXY(i, buv.getX(i) * 300, buv.getY(i) * 300);
   const big = new THREE.Mesh(bigGeo, grassMat("#a9b98a"));
   big.rotateX(-Math.PI / 2);
   big.position.y = -0.03;
+  if (hf) {
+    const BP = bigGeo.attributes.position;
+    for (let i = 0; i < BP.count; i++) {
+      const x = BP.getX(i), z = -BP.getY(i); // rotateX(-90°) sonrası dünya z = −y
+      BP.setZ(i, hf(x, z));
+    }
+    BP.needsUpdate = true;
+  }
   big.receiveShadow = true;
   g.add(big);
   // uzak tepeler (sis ile karışır)
@@ -1470,7 +1485,7 @@ function buildGround(f: FullData, g: THREE.Group) {
 }
 
 /* ---------------- çevre nesneleri ---------------- */
-function buildEnv(objs: EnvObj[], g: THREE.Group) {
+function buildEnv(objs: EnvObj[], g: THREE.Group, hf: ((x: number, z: number) => number) | null = null) {
   const std = (color: string, rough = 0.9) => new THREE.MeshStandardMaterial({ color, roughness: rough, flatShading: true });
   const leafMat = (color: string) => new THREE.MeshStandardMaterial({ color, roughness: 0.95, vertexColors: true });
   /** organik yaprak kümesi: gürültüyle şişirilmiş küre, alt kısmı koyu */
@@ -1669,7 +1684,7 @@ function buildEnv(objs: EnvObj[], g: THREE.Group) {
       add(new THREE.BoxGeometry(w, h, Math.max(0.1, d)), std(o.color), 0, h / 2, 0);
     }
     og.rotation.y = (-o.rot * Math.PI) / 180;
-    og.position.set(o.x, 0, o.y);
+    og.position.set(o.x, hf ? hf(o.x, o.y) : 0, o.y);
     g.add(og);
   }
 }
@@ -1743,6 +1758,27 @@ export function buildHouse(f: FullData, fi: number, v: V3, secPlane?: THREE.Plan
     if (v.items) for (const it of fl.items) buildItem(it, bases[i], m, fg);
     if (bld.topSlab && i === topWalls && !v.cut) buildSlab(fl, fl, bases[i] + fl.height, plain, fg, undefined, bld.slabT);
   }
+  // eğimli arsada duvar altında açıkta kalan beton cokol
+  {
+    const hf = terrainFn(f);
+    const fl0 = f.floors[firstWalls];
+    if (hf && fl0 && firstWalls >= lo && firstWalls <= hi && (!staged || R("walls", firstWalls))) {
+      const pg = new THREE.Group();
+      pg.userData = { floor: firstWalls };
+      for (const w of fl0.walls) {
+        const L = Math.hypot(w.b.x - w.a.x, w.b.y - w.a.y);
+        const dep = -Math.min(hf(w.a.x, w.a.y), hf(w.b.x, w.b.y), hf((w.a.x + w.b.x) / 2, (w.a.y + w.b.y) / 2)) + 0.3;
+        if (dep <= 0.31 || L < 0.01) continue;
+        const me = new THREE.Mesh(new THREE.BoxGeometry(L, dep, w.t + 0.02), plain.concrete);
+        me.position.set((w.a.x + w.b.x) / 2, -dep / 2 + bases[firstWalls], (w.a.y + w.b.y) / 2);
+        me.rotation.y = -Math.atan2(w.b.y - w.a.y, w.b.x - w.a.x);
+        me.castShadow = true;
+        me.receiveShadow = true;
+        pg.add(me);
+      }
+      house.add(pg);
+    }
+  }
   // çatı: yalnızca en üst katlar gösteriliyorsa ve kesit kapalıysa
   const roofShown = v.roof && f.roof.kind !== "none" && R("roof") && !v.cut && v.sec !== "h" && topWalls >= 0 && hi >= topWalls && lo <= topWalls;
   if (roofShown) {
@@ -1764,7 +1800,7 @@ export function buildHouse(f: FullData, fi: number, v: V3, secPlane?: THREE.Plan
       gm0.material = mt;
     }
   }
-  buildEnv(f.env.objs, env);
+  buildEnv(f.env.objs, env, terrainFn(f));
   return { house, ground, env, roofShown, cutPlane };
 }
 

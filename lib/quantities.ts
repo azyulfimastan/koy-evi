@@ -3,6 +3,7 @@ import { area, fmt } from "./geo";
 import { rasterize, regionAt } from "./rooms";
 import { outsideFn, outsideMask } from "./scene3d";
 import { roofInfo } from "./roof";
+import { plinthInfo } from "./terrain";
 import { floorCols } from "./stages";
 import { defaultBuild } from "./types";
 import { EXT_TEX, FLOOR_TEX, INT_TEX, ROOF_TEX } from "./textures";
@@ -158,6 +159,14 @@ export function computeReport(f: FullData): Report {
     if (ri.usable > 0) add("Çatı arası kullanılabilir alan (≥1,80 m)", ri.usable, "m²");
   }
   if (stairs) add("Merdiven", stairs, "adet");
+  if ((f.terrain?.slope ?? 0) > 0) {
+    const pl = plinthInfo(f);
+    add("Eğim nedeniyle açıkta kalan cokol betonu", pl.vol, "m³", `en yüksek ${r2(pl.max)} m, eğim %${f.terrain!.slope}`);
+  }
+  // elle koyulan elektrik ve tesisat noktaları
+  const pts = new Map<string, number>();
+  for (const fl of f.floors) for (const it of fl.items) if (it.key.startsWith("e_") || it.key.startsWith("p_")) pts.set(it.name, (pts.get(it.name) ?? 0) + 1);
+  for (const [nm, q] of [...pts].sort()) add(`${nm} (planda işaretlenen)`, q, "adet");
   if (balN) {
     add("Balkon", balN, "adet");
     add("Balkon döşemesi (beton)", balVol, "m³", `${r2(balArea)} m² alan`);

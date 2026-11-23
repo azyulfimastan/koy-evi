@@ -92,7 +92,7 @@ export type Finish = {
   baseTex?: string;
 };
 export const defaultFinish = (): Finish => ({ extColor: "#e9e1d3", extTex: "plain", intColor: "#f4f0e8", intTex: "plain", doorColor: "#8a5a36", frameColor: "#f7f7f4", groundColor: "#93b565" });
-export type FullData = { plot: Plot; snap: number; defT: number; roof: Roof; floors: Floor[]; custom: CatItem[]; fin: Finish; env: Env; build?: Build };
+export type FullData = { plot: Plot; snap: number; defT: number; roof: Roof; floors: Floor[]; custom: CatItem[]; fin: Finish; env: Env; build?: Build; prices?: Record<string, number> /* metraj fiyatları (TL/birim) */; terrain?: { slope: number; dir: number } /* arsa eğimi % ve alçalma yönü (derece, 0 = kuzey, saat yönü) */ };
 
 /** Editörün o an çalıştığı kat + ortak ayarlar (düz görünüm) */
 export type PlanData = {
@@ -157,6 +157,8 @@ export function normalizeFull(d: any): FullData {
     fin: { ...defaultFinish(), ...(d.fin ?? {}) },
     env: { sun: { ...defaultEnv().sun, ...(d.env?.sun ?? {}) }, objs: Array.isArray(d.env?.objs) ? d.env.objs : [] },
     build: { ...defaultBuild(), ...(d.build ?? {}) },
+    prices: d.prices && typeof d.prices === "object" ? d.prices : {},
+    terrain: { slope: Number(d.terrain?.slope) || 0, dir: Number(d.terrain?.dir) || 0 },
   };
 }
 
@@ -187,5 +189,5 @@ export function unflatten(f: FullData, i: number, d: PlanData): FullData {
   const floors = f.floors.map((fl, k) =>
     k === i ? { ...fl, name: d.name, height: d.height, walls: d.walls, openings: d.openings, rooms: d.rooms, stairs: d.stairs, items: d.items, cols: d.cols, balconies: d.balconies } : fl
   );
-  return { plot: d.plot, snap: d.snap, defT: d.defT, roof: d.roof, floors, custom: d.custom, fin: d.fin, env: d.env, build: d.build };
+  return { ...f, plot: d.plot, snap: d.snap, defT: d.defT, roof: d.roof, floors, custom: d.custom, fin: d.fin, env: d.env, build: d.build };
 }

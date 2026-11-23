@@ -5,7 +5,8 @@ import { computeReport } from "@/lib/quantities";
 import { makePdf } from "@/lib/report";
 import { fmt } from "@/lib/geo";
 
-export default function Report({ full, name, onClose }: { full: FullData; name: string; onClose: () => void }) {
+export default function Report({ full, name, onClose, onPrices }: { full: FullData; name: string; onClose: () => void; onPrices?: (p: Record<string, number>) => void }) {
+  const [prices, setPrices] = useState<Record<string, number>>(full.prices ?? {});
   const rep = useMemo(() => computeReport(full), [full]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -28,6 +29,15 @@ export default function Report({ full, name, onClose }: { full: FullData; name: 
     setBusy(false);
   };
 
+  const key = (r: { name: string; unit: string }) => `${r.name}|${r.unit}`;
+  const priced = [...rep.lines, ...rep.rough, ...rep.openings, ...rep.items];
+  const total = priced.reduce((t, r) => t + r.qty * (prices[key(r)] || 0), 0);
+  const setPrice = (r: { name: string; unit: string }, v: number) => {
+    const next = { ...prices, [key(r)]: v };
+    if (!(v > 0)) delete next[key(r)];
+    setPrices(next);
+    onPrices?.(next);
+  };
   const tbl = (head: string, rows: { name: string; qty: number; unit: string; note?: string }[]) =>
     rows.length ? (
       <section className="rsec">
@@ -42,6 +52,10 @@ export default function Report({ full, name, onClose }: { full: FullData; name: 
                 </td>
                 <td className="rq">
                   {fmt(r.qty, Number.isInteger(r.qty) ? 0 : 2)} {r.unit}
+                  <div className="rprice">
+                    <input inputMode="decimal" placeholder="TL/birim" aria-label={"Birim fiyat: " + r.name} defaultValue={prices[key(r)] ? String(prices[key(r)]).replace(".", ",") : ""} onBlur={(e) => setPrice(r, parseFloat(e.target.value.replace(",", ".")) || 0)} />
+                    {prices[key(r)] > 0 && <span>= {fmt(r.qty * prices[key(r)], 0)} TL</span>}
+                  </div>
                 </td>
               </tr>
             ))}
@@ -96,6 +110,11 @@ export default function Report({ full, name, onClose }: { full: FullData; name: 
         {tbl("Kaba yapı ve tesisat (tahmini)", rep.rough)}
         {tbl("Kapı ve pencereler", rep.openings)}
         {tbl("Eşyalar", rep.items)}
+        <section className="rsec">
+          <h3>Maliyet tahmini</h3>
+          <table className="rtab"><tbody><tr><td>Fiyat girilen kalemlerin toplamı</td><td className="rq"><b>{fmt(total, 0)} TL</b></td></tr></tbody></table>
+          <p className="rnote">Her kalemin altındaki kutuya birim fiyatı (TL) yaz. Fiyatlar kaydedilir; programda hazır fiyat yoktur, kendi bölgenin fiyatını gir.</p>
+        </section>
         <p className="rnote">Miktarlar plandan otomatik hesaplanır ve yaklaşıktır; fire payı %{rep.waste * 100} eklenmiştir.</p>
       </div>
     </div>

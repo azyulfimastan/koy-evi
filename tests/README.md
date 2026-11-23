@@ -29,6 +29,7 @@ Sonra `tests/e2e` klasöründen (görüntüler `tests/shots/` içine düşer):
 | `yedek_test.py` | şablon, yedek indir/yükle, sürüm geçmişi, çöp kutusu |
 | `balkon_test.py` | balkon aracı, panel, şablondaki balkon, 3D |
 | `demo_test.py` | uygulama içi 🎬 demo, örnek uygula düğmeleri |
+| `v20_test.py` | arsa eğimi, fiyatlı metraj, elektrik-tesisat noktaları, telefonda dokunmayla ↕ tutamacı |
 | `insaat_test.py` | çatı yok, inşaat aşamaları, orta tuşla döndürme, duvarı tutup yukarı çekme, direkler |
 | `akicilik_test.py` | telefon hızında kare süreleri (2D önizleme, kaydırma, 3D döndürme) |
 | `cizim_test.py` | duvar çizerken 90° kilidi, rakamla ölçü, çift tıkla ölçü, 90° yap |

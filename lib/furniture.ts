@@ -1,6 +1,6 @@
 import type { CatItem, Item } from "./types";
 
-export const CATS = ["Yatak odası", "Oturma", "Yemek", "Mutfak", "Banyo", "Isıtma", "Çalışma / Diğer", "Özel"];
+export const CATS = ["Yatak odası", "Oturma", "Yemek", "Mutfak", "Banyo", "Isıtma", "Çalışma / Diğer", "Elektrik", "Tesisat", "Özel"];
 
 const C = {
   bed: "#c9d9f0",
@@ -14,6 +14,16 @@ const C = {
 
 // ölçüler metre: w (genişlik), d (derinlik), h (yükseklik)
 export const CATALOG: CatItem[] = [
+  { key: "e_socket", name: "Priz", cat: "Elektrik", w: 0.08, d: 0.04, h: 0.08, shape: "rect", color: "#f4f1e8", elev: 0.3 },
+  { key: "e_switch", name: "Anahtar", cat: "Elektrik", w: 0.08, d: 0.04, h: 0.08, shape: "rect", color: "#f4f1e8", elev: 1.1 },
+  { key: "e_lamp", name: "Tavan lambası", cat: "Elektrik", w: 0.35, d: 0.35, h: 0.1, shape: "round", color: "#fff3c4", elev: 2.6 },
+  { key: "e_panel", name: "Sigorta panosu", cat: "Elektrik", w: 0.4, d: 0.12, h: 0.5, shape: "rect", color: "#9aa4ad", elev: 1.4 },
+  { key: "e_meter", name: "Elektrik sayacı", cat: "Elektrik", w: 0.3, d: 0.15, h: 0.4, shape: "rect", color: "#bfc6cc", elev: 1.3 },
+  { key: "p_tap", name: "Su musluğu / çıkışı", cat: "Tesisat", w: 0.1, d: 0.1, h: 0.1, shape: "round", color: "#5aa0c8", elev: 0.9 },
+  { key: "p_drain", name: "Gider (sifon)", cat: "Tesisat", w: 0.12, d: 0.12, h: 0.03, shape: "round", color: "#555a5f", elev: 0 },
+  { key: "p_boiler", name: "Şofben / kombi", cat: "Tesisat", w: 0.4, d: 0.3, h: 0.7, shape: "rect", color: "#e9edf0", elev: 1.2 },
+  { key: "p_tank", name: "Su deposu (500 L)", cat: "Tesisat", w: 0.9, d: 0.9, h: 1.2, shape: "round", color: "#4c7fa3", elev: 0 },
+  { key: "p_septic", name: "Foseptik kapağı", cat: "Tesisat", w: 0.8, d: 0.8, h: 0.05, shape: "rect", color: "#6b6b66", elev: 0 },
   { key: "bed2", name: "Çift kişilik yatak", cat: "Yatak odası", w: 1.6, d: 2.0, h: 0.5, shape: "bed", color: C.bed },
   { key: "bed1", name: "Tek kişilik yatak", cat: "Yatak odası", w: 0.9, d: 2.0, h: 0.5, shape: "bed", color: C.bed },
   { key: "bunk", name: "Ranza", cat: "Yatak odası", w: 0.9, d: 2.0, h: 1.7, shape: "bed", color: C.bed },
