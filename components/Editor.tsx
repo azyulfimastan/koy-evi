@@ -21,7 +21,7 @@ const Backup = dynamic(() => import("./Backup"), { ssr: false });
 const Report = dynamic(() => import("./Report"), { ssr: false });
 const View3D = dynamic(() => import("./View3D"), { ssr: false, loading: () => <div className="v3 v3load">3D hazırlanıyor…</div> });
 
-import { ROOM_COLORS, TOOL_HINT, WALL_COLOR, cloneF, defaults, near, type Saved, type Sel, type Tool, type View } from "./editor/shared";
+import { ROOM_COLORS, TOOL_HINT, WALL_COLOR, cloneF, defaults, near, type Saved, type Sel, type SnapInfo, type Tool, type View } from "./editor/shared";
 import { drawPlan } from "./editor/drawPlan";
 import { MatRow, NumField } from "./editor/fields";
 
@@ -37,6 +37,9 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
   const [sel, setSel] = useState<Sel>(null);
   // imleç önizlemesi: React yeniden çizimi tetiklemeden, karede bir kez tuvale çizilir
   const hoverRef = useRef<Pt | null>(null);
+  const snapRef = useRef<SnapInfo>(null);
+  const lastTap = useRef<{ id: string; t: number } | null>(null);
+  const [lenEdit, setLenEdit] = useState<{ kind: "wall" | "draw"; id?: string; x: number; y: number; v: string } | null>(null);
   const drawRef = useRef<() => void>(() => {});
   const rafDraw = useRef(0);
   const setHover = useCallback((p: Pt | null) => {
@@ -316,9 +319,111 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
   // ---------- yardımcılar ----------
   const sn = (p: Pt): Pt => ({ x: round3(snapTo(p.x, dataRef.current.snap)), y: round3(snapTo(p.y, dataRef.current.snap)) });
 
+  /** zincirdeki son noktadan w2'ye duvar ekler (ilk tıklamada zinciri başlatır) */
+  function addWallTo(w2: Pt) {
+    const cur = dataRef.current;
+    const ch = chainRef.current;
+    if (!ch) {
+      setChain(w2);
+      chainFirst.current = w2;
+      chainCount.current = 0;
+      return;
+    }
+    if (dist(ch, w2) < 1e-6) {
+      setChain(null);
+      return;
+    }
+    const wall: Wall = { id: uid(), a: ch, b: w2, t: cur.defT, color: WALL_COLOR };
+    apply({ ...cur, walls: [...cur.walls, wall] });
+    chainCount.current += 1;
+    if (chainFirst.current && near(w2, chainFirst.current) && chainCount.current >= 2) setChain(null);
+    else setChain(w2);
+  }
+
+  /** seçili duvarı en yakın dik/düz açıya getirir (başlangıç ucu sabit, uzunluk korunur) */
+  function straightenWall(id: string) {
+    const d = dataRef.current;
+    const w = d.walls.find((x) => x.id === id);
+    if (!w) return;
+    const L = dist(w.a, w.b);
+    if (L < 0.01) return;
+    const th = Math.atan2(w.b.y - w.a.y, w.b.x - w.a.x);
+    const angs: number[] = [];
+    for (let k = 0; k < 4; k++) angs.push((k * Math.PI) / 2);
+    for (const o of d.walls) {
+      if (o.id === id) continue;
+      let phi: number | null = null;
+      if (near(o.a, w.a) || near(o.b, w.a)) phi = Math.atan2(o.b.y - o.a.y, o.b.x - o.a.x);
+      if (phi !== null) for (let k = 0; k < 4; k++) angs.push(phi + (k * Math.PI) / 2);
+    }
+    let bestA = angs[0];
+    let bestD = Infinity;
+    for (const a of angs) {
+      const df = Math.abs(((th - a + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
+      if (df < bestD) {
+        bestD = df;
+        bestA = a;
+      }
+    }
+    const nb = { x: round3(w.a.x + Math.cos(bestA) * L), y: round3(w.a.y + Math.sin(bestA) * L) };
+    if (near(nb, w.b, 1e-4)) {
+      setNote("Bu duvar zaten düz/dik.");
+      return;
+    }
+    apply({ ...d, walls: moveEndpoints(d, w.b, nb) });
+  }
+
+  /** çift tıklama / çizerken rakam yazma: ölçü kutusunu açar */
+  function openLenWall(id: string) {
+    const w = dataRef.current.walls.find((x) => x.id === id);
+    if (!w) return;
+    const m = toScreen({ x: (w.a.x + w.b.x) / 2, y: (w.a.y + w.b.y) / 2 });
+    setLenEdit({ kind: "wall", id, x: m.x, y: m.y, v: dist(w.a, w.b).toFixed(2).replace(".", ",") });
+  }
+  function openLenDraw(first = "") {
+    const ch = chainRef.current;
+    const hv = hoverRef.current;
+    if (!ch) return;
+    const m = toScreen(hv ? { x: (ch.x + hv.x) / 2, y: (ch.y + hv.y) / 2 } : ch);
+    setLenEdit({ kind: "draw", x: m.x, y: m.y, v: first });
+  }
+  function commitLen() {
+    const le = lenEdit;
+    setLenEdit(null);
+    if (!le) return;
+    const v = parseFloat(le.v.replace(",", "."));
+    if (!isFinite(v) || v < 0.1 || v > 200) {
+      if (le.v.trim()) setNote("Ölçü 0,1 ile 200 m arasında olmalı.");
+      return;
+    }
+    const d = dataRef.current;
+    if (le.kind === "wall" && le.id) {
+      const w = d.walls.find((x) => x.id === le.id);
+      if (!w) return;
+      const nb = setEdgeLength([w.a, w.b], 0, round3(v))[1];
+      apply({ ...d, walls: moveEndpoints(d, w.b, nb) });
+    } else if (le.kind === "draw") {
+      const ch = chainRef.current;
+      if (!ch) return;
+      const hv = hoverRef.current;
+      let ux = 1;
+      let uy = 0;
+      if (hv && dist(hv, ch) > 1e-6) {
+        const L = dist(hv, ch);
+        ux = (hv.x - ch.x) / L;
+        uy = (hv.y - ch.y) / L;
+      }
+      addWallTo({ x: round3(ch.x + ux * v), y: round3(ch.y + uy * v) });
+    }
+  }
+
   function snapWall(raw: Pt, from: Pt | null): Pt {
     const d = dataRef.current;
     const R = 12 / viewRef.current.s;
+    const set = (kind: NonNullable<SnapInfo>["kind"], label: string, guides: { a: Pt; b: Pt }[] = []) => {
+      snapRef.current = { kind, label, guides };
+    };
+    // 1) uç noktalar
     let best: Pt | null = null;
     let bd = R;
     const cands: Pt[] = [...d.plot.points];
@@ -330,23 +435,95 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
         best = c;
       }
     }
-    if (best) return { x: best.x, y: best.y };
-    let p = { ...raw };
-    let fx = false;
-    let fy = false;
-    if (from) {
-      const dx = p.x - from.x;
-      const dy = p.y - from.y;
-      if (Math.abs(dy) < Math.abs(dx) * 0.07) {
-        p.y = from.y;
-        fy = true;
-      } else if (Math.abs(dx) < Math.abs(dy) * 0.07) {
-        p.x = from.x;
-        fx = true;
+    if (best) {
+      set("end", "Uç nokta");
+      return { x: best.x, y: best.y };
+    }
+    // 2) duvar orta noktaları
+    for (const w of d.walls) {
+      const m = { x: (w.a.x + w.b.x) / 2, y: (w.a.y + w.b.y) / 2 };
+      if (dist(m, raw) < R) {
+        set("mid", "Orta nokta");
+        return { x: round3(m.x), y: round3(m.y) };
       }
     }
-    const s = sn(p);
-    return { x: fx ? p.x : s.x, y: fy ? p.y : s.y };
+    // 3) açı kilidi (çizilen duvarın başlangıcına göre)
+    if (from) {
+      const dx = raw.x - from.x;
+      const dy = raw.y - from.y;
+      const L = Math.hypot(dx, dy);
+      if (L > 0.05) {
+        const th = Math.atan2(dy, dx);
+        // önceki duvar (zincirin son duvarı) yönü
+        let phi: number | null = null;
+        for (const w of d.walls) {
+          if (near(w.b, from) && dist(w.a, w.b) > 0.01) phi = Math.atan2(w.b.y - w.a.y, w.b.x - w.a.x);
+          else if (near(w.a, from) && dist(w.a, w.b) > 0.01) phi = Math.atan2(w.a.y - w.b.y, w.a.x - w.b.x);
+        }
+        const D = Math.PI / 180;
+        const cs: { a: number; tol: number; label: string }[] = [];
+        for (let k = 0; k < 4; k++) cs.push({ a: (k * Math.PI) / 2, tol: 5 * D, label: k % 2 ? "Dikey" : "Yatay" });
+        if (phi !== null) {
+          for (let k = 0; k < 4; k++) {
+            const a = phi + (k * Math.PI) / 2;
+            cs.push({ a, tol: 5 * D, label: k % 2 ? "90° (önceki duvara dik)" : "Önceki duvarla düz" });
+          }
+        }
+        for (let k = 0; k < 8; k++) if (k % 2) cs.push({ a: (k * Math.PI) / 4, tol: 3 * D, label: "45°" });
+        let pick: { a: number; diff: number; label: string } | null = null;
+        for (const c of cs) {
+          const df = Math.abs(((th - c.a + Math.PI * 3) % (Math.PI * 2)) - Math.PI); // açı farkı, 0 = aynı yön
+          if (df < c.tol && (!pick || df < pick.diff - 1e-9)) pick = { a: c.a, diff: df, label: c.label };
+        }
+        if (pick) {
+          let lab = pick.label;
+          // eksen + önceki duvara dik aynı anda: "90°" göster
+          if (phi !== null && (lab === "Yatay" || lab === "Dikey")) {
+            const rel = Math.abs((((pick.a - phi) % Math.PI) + Math.PI) % Math.PI);
+            if (Math.abs(rel - Math.PI / 2) < 0.02) lab = "90° " + lab.toLowerCase();
+          }
+          const ux = Math.cos(pick.a);
+          const uy = Math.sin(pick.a);
+          const Lq = Math.max(d.snap, snapTo(L, d.snap));
+          const p = { x: round3(from.x + ux * Lq), y: round3(from.y + uy * Lq) };
+          const ext = 0.6;
+          set("ang", lab, [{ a: from, b: { x: p.x + ux * ext, y: p.y + uy * ext } }]);
+          return p;
+        }
+      }
+    }
+    // 4) duvara dik ayak noktası
+    if (from) {
+      for (const w of d.walls) {
+        if (near(w.a, from) || near(w.b, from)) continue;
+        const pr = segProject(from, w.a, w.b);
+        if (pr.t <= 0.02 || pr.t >= 0.98 || pr.d < 0.05) continue;
+        if (dist(pr.q, raw) < R) {
+          set("perp", "Duvara dik", [{ a: from, b: pr.q }]);
+          return { x: round3(pr.q.x), y: round3(pr.q.y) };
+        }
+      }
+    }
+    // 5) mevcut noktalarla hizalama + ızgara
+    const p = sn(raw);
+    const guides: { a: Pt; b: Pt }[] = [];
+    for (const c of cands) {
+      if (Math.abs(c.x - raw.x) < R * 0.6 && !guides.some((g) => g.a.x === c.x && g.a.y === c.y)) {
+        p.x = c.x;
+        guides.push({ a: c, b: { x: c.x, y: p.y } });
+        break;
+      }
+    }
+    for (const c of cands) {
+      if (Math.abs(c.y - raw.y) < R * 0.6) {
+        p.y = c.y;
+        guides.push({ a: c, b: { x: p.x, y: c.y } });
+        break;
+      }
+    }
+    if (guides.length) set("align", "Hizalı", guides);
+    else set("grid", "");
+    return p;
   }
 
   function hitWall(p: Pt, tolPx = 8): Wall | null {
@@ -395,7 +572,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
   // ---------- çizim (components/editor/drawPlan.ts) ----------
   const draw = useCallback(() => {
     if (!cv.current || !wrap.current) return;
-    drawPlan(cv.current, wrap.current, { data, full, fi, view, sel, hover: hoverRef.current, chain, tool, pick, envPick, regions, roomCanvases, joins, placeOn });
+    drawPlan(cv.current, wrap.current, { data, full, fi, view, sel, hover: hoverRef.current, chain, snapInfo: snapRef.current, tool, pick, envPick, regions, roomCanvases, joins, placeOn });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, full, fi, view, sel, chain, tool, pick, envPick, regions, roomCanvases, joins]);
   drawRef.current = draw;
@@ -518,26 +695,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
     }
 
     if (t === "wall") {
-      drag.current = pan(() => {
-        const cur = dataRef.current;
-        const ch = chainRef.current;
-        const w2 = snapWall(toWorld(p.x, p.y), ch);
-        if (!ch) {
-          setChain(w2);
-          chainFirst.current = w2;
-          chainCount.current = 0;
-          return;
-        }
-        if (dist(ch, w2) < 1e-6) {
-          setChain(null);
-          return;
-        }
-        const wall: Wall = { id: uid(), a: ch, b: w2, t: cur.defT, color: WALL_COLOR };
-        apply({ ...cur, walls: [...cur.walls, wall] });
-        chainCount.current += 1;
-        if (chainFirst.current && near(w2, chainFirst.current) && chainCount.current >= 2) setChain(null);
-        else setChain(w2);
-      });
+      drag.current = pan(() => addWallTo(snapWall(toWorld(p.x, p.y), chainRef.current)));
       return;
     }
 
@@ -736,6 +894,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
     const t = toolRef.current;
     const wpt = toWorld(p.x, p.y);
     const updateHover = () => {
+      if (t !== "wall") snapRef.current = null;
       if (t === "wall") setHover(snapWall(wpt, chainRef.current));
       else if (t === "plot" && !dataRef.current.plot.closed) setHover(sn(wpt));
       else if (t === "door" || t === "window") setHover(wpt);
@@ -853,7 +1012,15 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
       if (!d.moved) d.click?.();
       return;
     }
-    if (d.kind === "wmove" && !d.moved) return;
+    if (d.kind === "wmove" && !d.moved) {
+      const now = performance.now();
+      const lt = lastTap.current;
+      if (lt && lt.id === d.id && now - lt.t < 450) {
+        lastTap.current = null;
+        openLenWall(d.id);
+      } else lastTap.current = { id: d.id, t: now };
+      return;
+    }
     if (d.kind === "smove" && !d.moved) return;
     if (d.kind === "imove" && !d.moved) return;
     if (d.kind === "emove" && !d.moved) return;
@@ -1047,7 +1214,11 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
         redo();
       } else if ((e.key === "Delete" || e.key === "Backspace") && selRef.current) {
         deleteSel();
+      } else if (toolRef.current === "wall" && chainRef.current && /^[0-9.,]$/.test(e.key) && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        openLenDraw(e.key);
       } else if (e.key === "Escape") {
+        setLenEdit(null);
         setSel(null);
         setChain(null);
         chainFirst.current = null;
@@ -1201,10 +1372,30 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
             }}
           />
           <div className="hint">{note || hint()}</div>
+          {lenEdit && (
+            <div className="lenbox" style={{ left: Math.max(8, lenEdit.x - 60), top: Math.max(8, lenEdit.y - 52) }}>
+              <input
+                autoFocus
+                inputMode="decimal"
+                value={lenEdit.v}
+                aria-label="Duvar uzunluğu (m)"
+                onFocus={(e) => (lenEdit.kind === "wall" ? e.currentTarget.select() : e.currentTarget.setSelectionRange(e.currentTarget.value.length, e.currentTarget.value.length))}
+                onChange={(e) => setLenEdit({ ...lenEdit, v: e.target.value })}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") commitLen();
+                  else if (e.key === "Escape") setLenEdit(null);
+                  e.stopPropagation();
+                }}
+                onBlur={() => commitLen()}
+              />
+              <span>m</span>
+            </div>
+          )}
           {tool === "wall" && chain && (
-            <button className="floatbtn" onClick={() => setChain(null)}>
-              Duvarı bitir
-            </button>
+            <div className="floatbtn">
+              <button onClick={() => openLenDraw("")}>📏 Ölçü yaz</button>
+              <button onClick={() => setChain(null)}>Duvarı bitir</button>
+            </div>
           )}
         </div>
 
@@ -1490,6 +1681,9 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
                     apply({ ...d, walls: moveEndpoints(d, selWall.b, nb) });
                   }}
                 />
+                <button className="straightbtn" onClick={() => straightenWall(selWall.id)}>
+                  📐 90° / düz yap
+                </button>
                 <NumField
                   key={selWall.id + ":t:" + selWall.t}
                   label="Kalınlık (cm)"

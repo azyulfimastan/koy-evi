@@ -51,8 +51,13 @@ input, select { border: 1px solid var(--line); border-radius: 8px; padding: 8px 
 .modes { gap: 6px; }
 .modes button.on { background: var(--green); border-color: var(--green); color: #fff; }
 .modes button { flex: 1; }
-.floatbtn { position: absolute; right: 10px; top: 10px; background: #d9822b; color: #fff; border-color: #d9822b; }
-.floatbtn:hover:not(:disabled) { background: #c2731f !important; }
+.floatbtn { position: absolute; left: 50%; transform: translateX(-50%); bottom: 14px; display: flex; gap: 6px; z-index: 3; white-space: nowrap; }
+.floatbtn button { background: #d9822b; color: #fff; border-color: #d9822b; }
+.floatbtn button:hover:not(:disabled) { background: #c2731f !important; }
+.lenbox { position: absolute; z-index: 5; display: flex; align-items: center; gap: 4px; background: #fff; border: 2px solid #d9822b; border-radius: 10px; padding: 4px 8px; box-shadow: 0 4px 14px rgba(0,0,0,.25); }
+.lenbox input { width: 72px; border: 0; outline: 0; font-size: 18px; font-weight: 600; text-align: right; padding: 4px; background: transparent; }
+.lenbox span { color: #8a4b0b; font-weight: 600; }
+.straightbtn { width: 100%; margin: 6px 0; }
 .stage { flex: 1; min-height: 0; display: flex; }
 .cv { flex: 1; position: relative; min-width: 0; min-height: 0; overflow: hidden; }
 .cv canvas { position: absolute; inset: 0; touch-action: none; cursor: crosshair; display: block; }

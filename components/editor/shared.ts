@@ -21,7 +21,7 @@ export const near = (a: Pt, b: Pt, e = 0.002) => Math.hypot(a.x - b.x, a.y - b.y
 export const TOOL_HINT: Record<Tool, string> = {
   select: "Bir duvara, kapıya, pencereye veya odaya dokun. Duvarı sürükleyerek taşı.",
   plot: "",
-  wall: "Duvarın başlangıcına dokun, sonra köşelere sırayla dokun. Bitirmek için aynı noktaya tekrar dokun.",
+  wall: "Duvarın başlangıcına dokun, sonra köşelere sırayla dokun. Çizerken rakam yazarak ölçü girebilirsin. Bitirmek için aynı noktaya tekrar dokun.",
   door: "Kapı koymak istediğin duvara dokun.",
   window: "Pencere koymak istediğin duvara dokun.",
   room: "Duvarlarla kapalı bir alanın içine dokun, oda otomatik oluşur.",
@@ -35,3 +35,10 @@ export const TOOL_HINT: Record<Tool, string> = {
 /** yeni kapı / pencerenin varsayılan ölçüleri */
 export const defaults = (kind: "door" | "window") =>
   kind === "door" ? { w: 0.9, h: 2.1, sill: 0, shape: "rect" as const } : { w: 1.2, h: 1.2, sill: 0.9, shape: "rect" as const };
+
+/** imleç yakalama bilgisi (SolidWorks tarzı gösterge): ne yakalandı, hangi kılavuz çizgiler çizilecek */
+export type SnapInfo = {
+  kind: "end" | "mid" | "perp" | "ang" | "align" | "grid";
+  label: string;
+  guides: { a: Pt; b: Pt }[];
+} | null;

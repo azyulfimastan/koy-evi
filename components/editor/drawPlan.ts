@@ -7,7 +7,7 @@ import { drawItem } from "@/lib/furniture";
 import { dist, fmt } from "@/lib/geo";
 import { ENV_KINDS, drawEnv } from "@/lib/env";
 import { floorColor, roomImage, texPattern } from "@/lib/plan2d";
-import { WALL_COLOR, defaults, type Sel, type Tool, type View } from "./shared";
+import { WALL_COLOR, defaults, type Sel, type SnapInfo, type Tool, type View } from "./shared";
 
 export type PlanState = {
   data: PlanData;
@@ -17,6 +17,7 @@ export type PlanState = {
   sel: Sel;
   hover: Pt | null;
   chain: Pt | null;
+  snapInfo: SnapInfo;
   tool: Tool;
   pick: CatItem | null;
   envPick: EnvKind | null;
@@ -29,7 +30,7 @@ export type PlanState = {
 
 /** 2B planın tamamını tuvale çizer (ızgara, arsa, odalar, duvarlar, açıklıklar, eşyalar, ölçüler) */
 export function drawPlan(c: HTMLCanvasElement, el: HTMLDivElement, st: PlanState) {
-  const { data, full, fi, view, sel, hover, chain, tool, pick, envPick, regions, roomCanvases, joins, placeOn } = st;
+  const { data, full, fi, view, sel, hover, chain, snapInfo, tool, pick, envPick, regions, roomCanvases, joins, placeOn } = st;
   const { plot, walls, openings, rooms, stairs, items, env } = data;
   const dpr = window.devicePixelRatio || 1;
   const W = el.clientWidth;
@@ -268,10 +269,49 @@ export function drawPlan(c: HTMLCanvasElement, el: HTMLDivElement, st: PlanState
   }
   if (tool === "wall" && hover) {
     const h = S(hover);
+    // kılavuz çizgiler (kesikli)
+    if (snapInfo && snapInfo.guides.length) {
+      g.save();
+      g.setLineDash([6, 5]);
+      g.strokeStyle = "rgba(217,130,43,0.8)";
+      g.lineWidth = 1.2;
+      for (const gd of snapInfo.guides) {
+        const ga = S(gd.a);
+        const gb = S(gd.b);
+        g.beginPath();
+        g.moveTo(ga.x, ga.y);
+        g.lineTo(gb.x, gb.y);
+        g.stroke();
+      }
+      g.restore();
+    }
+    g.strokeStyle = "#d9822b";
     g.fillStyle = "#d9822b";
-    g.beginPath();
-    g.arc(h.x, h.y, 4.5, 0, Math.PI * 2);
-    g.fill();
+    g.lineWidth = 2;
+    const k = snapInfo?.kind;
+    if (k === "end") {
+      g.strokeRect(h.x - 6, h.y - 6, 12, 12);
+    } else if (k === "mid") {
+      g.beginPath();
+      g.moveTo(h.x, h.y - 7);
+      g.lineTo(h.x + 7, h.y + 5);
+      g.lineTo(h.x - 7, h.y + 5);
+      g.closePath();
+      g.stroke();
+    } else if (k === "perp") {
+      g.beginPath();
+      g.moveTo(h.x - 7, h.y + 6);
+      g.lineTo(h.x - 7, h.y - 6);
+      g.lineTo(h.x + 7, h.y - 6);
+      g.stroke();
+    } else {
+      g.beginPath();
+      g.arc(h.x, h.y, k === "ang" || k === "align" ? 5.5 : 4.5, 0, Math.PI * 2);
+      g.fill();
+    }
+    if (snapInfo && snapInfo.label) {
+      label(g, snapInfo.label, h.x + 14, h.y + 22, "#8a4b0b");
+    }
   }
   // kapı/pencere önizlemesi
   if ((tool === "door" || tool === "window") && hover) {
