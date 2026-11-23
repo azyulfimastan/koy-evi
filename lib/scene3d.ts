@@ -4,7 +4,7 @@ import type { EnvObj, FullData, Finish, Floor, Item, Opening, Stair } from "./ty
 import { FLOOR_DEFAULT, ROUGH, TEX_SIZE, getNormal, getTex } from "./textures";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import { inRegion, rasterize, regionAt, wallGeom } from "./rooms";
-import { roofInfo } from "./roof";
+import { roofInfo, roofParts, type RoofInfo } from "./roof";
 import { balconyRect } from "./balcony";
 import { terrainFn } from "./terrain";
 import type { Balcony } from "./types";
@@ -670,11 +670,16 @@ function buildPlinth(f: FullData, fi: number, m: Mats, g: THREE.Group) {
   }
   const merged = geos.length ? mergeGeometries(geos) : null;
   geos.forEach((q) => q.dispose());
-  if (!merged) return;
-  const mesh = new THREE.Mesh(merged, mat);
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
-  g.add(mesh);
+  if (merged) {
+    const mesh = new THREE.Mesh(merged, mat);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    g.add(mesh);
+  }
+  // kaidenin içi: döşemenin altından zemine kadar dolgu (iç mekân boşluk kalmasın)
+  const bs = floorBases(f)[fi];
+  const T = bs - (b.slabT ?? 0.2);
+  if (T > 0.02) buildSlab(fl, null, bs - (b.slabT ?? 0.2), m, g, m.concrete, T);
 }
 
 /* ---------------- oda zemin kaplamaları ---------------- */
@@ -1267,8 +1272,10 @@ function buildItem(it: Item, base: number, m: Mats, g: THREE.Group) {
 
 /* ---------------- çatı ---------------- */
 function buildRoof(f: FullData, base: number, m: Mats, g: THREE.Group) {
-  const ri = roofInfo(f);
-  if (!ri) return;
+  for (const ri of roofParts(f)) buildRoofOne(f, ri, base, m, g);
+}
+
+function buildRoofOne(f: FullData, ri: RoofInfo, base: number, m: Mats, g: THREE.Group) {
   const rf = f.roof;
   const o = rf.overhang;
   const tan = Math.tan((rf.pitch * Math.PI) / 180);

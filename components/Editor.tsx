@@ -2326,6 +2326,12 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
                   <span>Renk</span>
                   <input type="color" value={full.roof.color} onChange={(e) => apply({ ...data, roof: { ...full.roof, color: e.target.value } })} />
                 </label>
+                {full.roof.parts && full.roof.parts.length > 0 && (
+                  <div className="warnbox">
+                    Bu ev kanatlı: her blok için ayrı çatı kurulu. Duvarları değiştirdiysen çatı eski ölçüde kalır.
+                    <button onClick={() => apply({ ...data, roof: { ...full.roof, parts: undefined } })}>Çatıyı duvarlara göre tek parça yap</button>
+                  </div>
+                )}
                 {(() => {
                   const ri = roofInfo(full);
                   if (!ri) return <div className="muted small">Çatıyı görmek için önce duvarları çiz.</div>;

@@ -35,3 +35,34 @@ test("kaide ve dış merdiven: girişe ve 1. kata dış merdiven, iç merdiven k
   assert.equal(r.full.floors[1].stairs.filter((q) => q.ext).length, 1);
   assert.equal(r.full.floors.flatMap((f) => f.stairs).filter((q) => !q.ext).length, 0);
 });
+
+import { shapePreset } from "../../lib/wizard";
+for (const kind of ["L", "T", "U"] as const) {
+  test(`${kind} şekilli ev: kanatlar var, her oda bağlı, giriş kapısı var`, () => {
+    for (const nf of [1, 2]) {
+      const s: WSpec = { ...defaultSpec(), floors: nf, autoSize: false };
+      const t = (type: any, w: number, d: number) => ({ id: newId(), type, w, d });
+      const one = [t("salon", 5, 4), t("mutfak", 3.5, 3), t("yatak", 3.5, 3.5), t("yatak", 3, 3), t("cocuk", 3, 3), t("banyo", 2.2, 2.5)];
+      s.rooms = nf === 1 ? [one] : [one.slice(0, 3), one.slice(3)];
+      const p = shapePreset(kind, s);
+      Object.assign(s, { shape: kind, houseW: p.houseW, houseD: p.houseD, wings: p.wings });
+      const r = generate(s);
+      assert.equal(r.warnings.filter((w) => w.includes("kapısı yok") || w.includes("konamadı") || w.includes("biniyor") || w.includes("değmiyor")).length, 0, r.warnings.join(" | "));
+      const f = r.full.floors[0];
+      assert.ok(f.rooms.length >= 4);
+      assert.ok(f.openings.some((o) => o.kind === "door"));
+      // taban alanı kutudan küçük (girinti var)
+      const A = r.rooms.filter((x) => x.floor === 0).reduce((a, x) => a + x.a, 0);
+      assert.ok(A < r.houseW * r.houseD - 1, `${A} ${r.houseW * r.houseD}`);
+    }
+  });
+}
+
+test("özel şekil: kanat başka kanada bağlanır, üst üste binen kanat reddedilir", () => {
+  const s: WSpec = { ...defaultSpec(), autoSize: false, houseW: 8, houseD: 6 };
+  s.rooms = [[{ id: newId(), type: "salon", w: 5, d: 4 }, { id: newId(), type: "yatak", w: 4, d: 3 }, { id: newId(), type: "yatak", w: 3, d: 3 }, { id: newId(), type: "banyo", w: 2, d: 2 }]];
+  s.wings = [{ id: newId(), to: 0, side: "E", align: 0, w: 4, d: 4 }, { id: newId(), to: 1, side: "S", align: 0, w: 4, d: 3 }, { id: newId(), to: 0, side: "E", align: 0, w: 4, d: 4 }];
+  const r = generate(s);
+  assert.ok(r.warnings.some((w) => w.includes("biniyor")));
+  assert.ok(r.houseW >= 12 && r.houseD >= 6);
+});

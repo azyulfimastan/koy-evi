@@ -2,13 +2,15 @@
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import { planSvg } from "@/lib/planSvg";
-import { RT, autoHouse, defaultSpec, floorName, generate, newId, type RoomType, type WBalcony, type WRoom, type WSpec } from "@/lib/wizard";
+import { RT, autoHouse, defaultSpec, floorName, generate, newId, shapePreset, type RoomType, type WBalcony, type WRoom, type WSpec, type WWing } from "@/lib/wizard";
 import type { V3 } from "@/lib/scene3d";
 
 const View3D = dynamic(() => import("./View3D"), { ssr: false, loading: () => <div className="wz3load">3D hazırlanıyor…</div> });
 const V3_ALL: V3 = { floors: "all", roof: true, items: true, sec: "none" };
 const SIDES = { S: "Ön (yol tarafı)", N: "Arka", E: "Sağ", W: "Sol" } as const;
-const STEPS = ["Arsa ve kat", "Odalar", "Balkonlar", "Çatı ve son"];
+const STEPS = ["Arsa ve kat", "Ev şekli", "Odalar", "Balkonlar", "Çatı ve son"];
+const SIDE_LABEL = { S: "Ön (yol tarafı)", N: "Arka", E: "Sağ", W: "Sol" } as const;
+const SHAPES: [WSpec["shape"], string][] = [["rect", "▭ Dikdörtgen"], ["L", "L"], ["T", "T"], ["U", "U"], ["custom", "✏️ Kendi şeklim"]];
 
 /** Ondalık virgül/nokta kabul eden küçük sayı kutusu */
 function Num({ v, on, min = 0, max = 99, step = 0.1, label }: { v: number; on: (n: number) => void; min?: number; max?: number; step?: number; label: string }) {
@@ -62,6 +64,15 @@ export default function Wizard({ onClose, onCreated }: { onClose: () => void; on
   const rooms = s.rooms[fl] ?? [];
   const patchRoom = (id: string, p: Partial<WRoom>) => setRooms(fl, rooms.map((r) => (r.id === id ? { ...r, ...p } : r)));
   const patchBal = (id: string, p: Partial<WBalcony>) => upd({ balconies: s.balconies.map((b) => (b.id === id ? { ...b, ...p } : b)) });
+
+  function pickShape(k: WSpec["shape"]) {
+    if (k === "rect") return upd({ shape: k, wings: [], autoSize: true });
+    if (k === "custom") return upd({ shape: k, autoSize: false, wings: s.wings.length ? s.wings : [{ id: newId(), to: 0, side: "E", align: 0, w: 4, d: 4 }], houseW: s.wings.length ? s.houseW : Math.round(res.houseW * 2) / 2, houseD: s.wings.length ? s.houseD : Math.round(res.houseD * 2) / 2 });
+    const p = shapePreset(k, s);
+    upd({ shape: k, autoSize: false, houseW: p.houseW, houseD: p.houseD, wings: p.wings });
+  }
+  const patchWing = (id: string, p: Partial<WWing>) => upd({ wings: s.wings.map((g) => (g.id === id ? { ...g, ...p } : g)), shape: "custom" });
+  const delWing = (gi: number) => upd({ shape: "custom", wings: s.wings.filter((_, i) => i !== gi).map((g) => ({ ...g, to: g.to === gi + 1 ? 0 : g.to > gi + 1 ? g.to - 1 : g.to })) });
 
   async function create() {
     setBusy(true);
@@ -130,6 +141,54 @@ export default function Wizard({ onClose, onCreated }: { onClose: () => void; on
 
           {step === 1 && (
             <section>
+              <h3>Evin şekli</h3>
+              <div className="wzchips">
+                {SHAPES.map(([k, l]) => <button key={k} className={s.shape === k ? "on" : ""} onClick={() => pickShape(k)}>{l}</button>)}
+              </div>
+              <h3>{s.shape === "rect" ? "Evin dış ölçüsü" : "Ana blok"}</h3>
+              {s.shape === "rect" && (
+                <label className="wchk"><input type="checkbox" checked={s.autoSize} onChange={(e) => upd({ autoSize: e.target.checked, houseW: e.target.checked ? s.houseW : res.houseW, houseD: e.target.checked ? s.houseD : res.houseD })} /> Oda toplamına göre otomatik ({auto.W.toString().replace(".", ",")} × {auto.D.toString().replace(".", ",")} m)</label>
+              )}
+              {(s.shape !== "rect" || !s.autoSize) && (
+                <div className="wzrow">
+                  <Num label="Genişlik (m)" v={s.houseW} on={(n) => upd({ houseW: n })} min={4} max={40} step={0.5} />
+                  <Num label="Derinlik (m)" v={s.houseD} on={(n) => upd({ houseD: n })} min={4} max={40} step={0.5} />
+                </div>
+              )}
+              {s.shape !== "rect" && (
+                <>
+                  <h3>Kanatlar</h3>
+                  <p className="wznote">Kanat, bir bloğun yanına eklenen dikdörtgendir. Birkaç kanatla istediğin şekli çıkarırsın. Kanatlar birbirinin üstüne binemez.</p>
+                  {s.wings.map((g, gi) => (
+                    <div className="wroom bal" key={g.id}>
+                      <label className="wsel"><span>Bağlı blok</span>
+                        <select value={g.to} onChange={(e) => patchWing(g.id, { to: +e.target.value })}>
+                          <option value={0}>Ana blok</option>
+                          {s.wings.slice(0, gi).map((_, k) => <option key={k} value={k + 1}>Kanat {k + 1}</option>)}
+                        </select></label>
+                      <label className="wsel"><span>Hangi cephe</span>
+                        <select value={g.side} onChange={(e) => patchWing(g.id, { side: e.target.value as WWing["side"] })}>
+                          {(Object.keys(SIDE_LABEL) as (keyof typeof SIDE_LABEL)[]).map((k) => <option key={k} value={k}>{SIDE_LABEL[k]}</option>)}
+                        </select></label>
+                      <label className="wsel"><span>Hizalama</span>
+                        <select value={g.align} onChange={(e) => patchWing(g.id, { align: +e.target.value as WWing["align"] })}>
+                          <option value={0}>Başta</option><option value={0.5}>Ortada</option><option value={1}>Sonda</option>
+                        </select></label>
+                      <span className="wzarea">Kanat {gi + 1}: {(g.w * g.d).toFixed(1).replace(".", ",")} m²</span>
+                      <Num label="Genişlik (m)" v={g.w} on={(n) => patchWing(g.id, { w: n })} min={2.5} max={30} step={0.5} />
+                      <Num label="Derinlik (m)" v={g.d} on={(n) => patchWing(g.id, { d: n })} min={2.5} max={30} step={0.5} />
+                      <button className="wdel" aria-label="Kanadı sil" onClick={() => delWing(gi)}>🗑</button>
+                    </div>
+                  ))}
+                  <button className="wadd" onClick={() => upd({ wings: [...s.wings, { id: newId(), to: 0, side: "E", align: 0, w: 4, d: 4 }], shape: "custom" })}>+ Kanat ekle</button>
+                </>
+              )}
+              <p className="wznote">Toplam yerleşim: {res.houseW.toFixed(1).replace(".", ",")} × {res.houseD.toFixed(1).replace(".", ",")} m kutu içinde, zemin kat odaları {res.rooms.filter((r) => r.floor === 0).reduce((a, r) => a + r.a, 0).toFixed(1).replace(".", ",")} m².</p>
+            </section>
+          )}
+
+          {step === 2 && (
+            <section>
               {s.floors > 1 && (
                 <div className="wzchips">
                   {Array.from({ length: s.floors }, (_, i) => <button key={i} className={fl === i ? "on" : ""} onClick={() => setFl(i)}>{floorName(i)}</button>)}
@@ -165,7 +224,7 @@ export default function Wizard({ onClose, onCreated }: { onClose: () => void; on
             </section>
           )}
 
-          {step === 2 && (
+          {step === 3 && (
             <section>
               <h3>Balkon ister misin?</h3>
               {s.balconies.length === 0 && <p className="wznote">Balkon yok. Eklemek için aşağıya dokun.</p>}
@@ -189,21 +248,13 @@ export default function Wizard({ onClose, onCreated }: { onClose: () => void; on
             </section>
           )}
 
-          {step === 3 && (
+          {step === 4 && (
             <section>
               <h3>Çatı</h3>
               <div className="wzchips">
                 {([["gable", "Beşik"], ["hip", "Kırma"], ["shed", "Tek eğimli"], ["flat", "Düz"], ["none", "Yok"]] as [WSpec["roof"], string][]).map(([k, l]) => <button key={k} className={s.roof === k ? "on" : ""} onClick={() => upd({ roof: k })}>{l}</button>)}
               </div>
               {s.roof !== "flat" && s.roof !== "none" && <Num label="Çatı eğimi (°)" v={s.pitch} on={(n) => upd({ pitch: n })} min={10} max={60} step={1} />}
-              <h3>Evin dış ölçüsü</h3>
-              <label className="wchk"><input type="checkbox" checked={s.autoSize} onChange={(e) => upd({ autoSize: e.target.checked, houseW: e.target.checked ? s.houseW : res.houseW, houseD: e.target.checked ? s.houseD : res.houseD })} /> Oda toplamına göre otomatik ({auto.W.toString().replace(".", ",")} × {auto.D.toString().replace(".", ",")} m)</label>
-              {!s.autoSize && (
-                <div className="wzrow">
-                  <Num label="Ev genişliği (m)" v={s.houseW} on={(n) => upd({ houseW: n })} min={4} max={40} step={0.5} />
-                  <Num label="Ev derinliği (m)" v={s.houseD} on={(n) => upd({ houseD: n })} min={4} max={40} step={0.5} />
-                </div>
-              )}
               <label className="wchk"><input type="checkbox" checked={s.furnish} onChange={(e) => upd({ furnish: e.target.checked })} /> Eşyaları da yerleştir</label>
               <h3>Evin adı</h3>
               <input className="wname" placeholder="örn. Alternatif A" value={name} onChange={(e) => setName(e.target.value)} />

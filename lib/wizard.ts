@@ -6,6 +6,9 @@ import { placeExtStair } from "./stairs";
 export type RoomType = "salon" | "salonmutfak" | "mutfak" | "yatak" | "cocuk" | "banyo" | "wc" | "calisma" | "depo";
 export type WRoom = { id: string; type: RoomType; w: number; d: number };
 export type WBalcony = { id: string; floor: number; side: "N" | "E" | "S" | "W"; w: number; d: number };
+export type Side = "N" | "E" | "S" | "W";
+/** Kanat: bir bloğun bir cephesine eklenen dikdörtgen. to: bağlandığı blok (0 = ana blok, 1 = 1. kanat...) */
+export type WWing = { id: string; to: number; side: Side; align: 0 | 0.5 | 1; w: number; d: number };
 export type WSpec = {
   plotW: number;
   plotD: number;
@@ -23,6 +26,8 @@ export type WSpec = {
   entryStair: boolean; // girişe dış merdiven
   upperExt: boolean; // 1. kata dış merdiven
   innerStair: boolean; // katlar arası iç merdiven
+  shape: "rect" | "L" | "T" | "U" | "custom";
+  wings: WWing[]; // ana bloğa (ve birbirlerine) eklenen kanatlar
 };
 
 export const RT: Record<RoomType, { name: string; color: string; floor: string; front: number; w: number; d: number }> = {
@@ -46,12 +51,10 @@ export function defaultSpec(): WSpec {
   return {
     plotW: 20, plotD: 24, autoSize: true, houseW: 10, houseD: 8, floors: 1, height: 2.8,
     rooms: [[r("salonmutfak", 6, 4.5), r("yatak", 3.5, 3.5), r("yatak", 3, 3), r("banyo", 2.2, 2.5)]],
-    balconies: [], roof: "gable", pitch: 30, furnish: true, plinth: 0, entryStair: true, upperExt: false, innerStair: true,
+    balconies: [], roof: "gable", pitch: 30, furnish: true, plinth: 0, entryStair: true, upperExt: false, innerStair: true, shape: "rect", wings: [],
   };
 }
 
-type Rect = { x0: number; y0: number; x1: number; y1: number };
-type Cell = Rect & { name: string; type: RoomType | "hol"; want: number; hub?: boolean };
 
 const HOL_W = 2.5;
 const area = (r: WRoom) => Math.max(1, r.w * r.d);
@@ -63,6 +66,7 @@ export function floorArea(rs: WRoom[], multi: boolean) {
 /** kat adı */
 export const floorName = (i: number) => (i === 0 ? "Zemin kat" : `${i}. kat`);
 
+
 export type WResult = { full: FullData; warnings: string[]; rooms: { floor: number; name: string; w: number; d: number; a: number; want: number }[]; houseW: number; houseD: number };
 
 export function autoHouse(s: WSpec) {
@@ -73,106 +77,260 @@ export function autoHouse(s: WSpec) {
   return { W: Math.max(W, 5), D: Math.max(D, multi ? 7 : 5) };
 }
 
+const r5 = (x: number) => Math.round(x * 2) / 2;
+/** Hazır şekil: toplam taban alanını ana blok + kanatlara böler */
+export function shapePreset(kind: "L" | "T" | "U", s: WSpec): { houseW: number; houseD: number; wings: WWing[] } {
+  const multi = s.floors > 1;
+  const A = Math.max(...s.rooms.slice(0, s.floors).map((rs) => floorArea(rs, multi)), 16) * 1.08;
+  const share = kind === "U" ? 0.55 : 0.62;
+  const mainA = A * share;
+  const W0 = Math.max(6, r5(Math.sqrt(mainA * 1.3)));
+  const D0 = Math.max(multi ? 7.5 : 5, r5(mainA / W0));
+  const mk = (w: number, align: 0 | 0.5 | 1, wa: number): WWing => ({ id: newId(), to: 0, side: "S", align, w: Math.max(3, r5(w)), d: Math.max(3, r5(wa / Math.max(3, r5(w)))) });
+  if (kind === "L") return { houseW: W0, houseD: D0, wings: [mk(W0 * 0.5, 0, A - mainA)] };
+  if (kind === "T") return { houseW: W0, houseD: D0, wings: [mk(W0 * 0.4, 0.5, A - mainA)] };
+  return { houseW: W0, houseD: D0, wings: [mk(W0 * 0.3, 0, (A - mainA) / 2), mk(W0 * 0.3, 1, (A - mainA) / 2)] };
+}
+
+type Block = { x: number; y: number; w: number; d: number };
+type Cell = { x0: number; y0: number; x1: number; y1: number; b: number; name: string; type: RoomType | "hol"; want: number; hub?: boolean };
+type Piece = { e0: number; e1: number; wall: Wall; ext: boolean };
+
+const edgeOf = (b: Block, side: Side) =>
+  side === "N" ? { ax: b.x, ay: b.y, dx: 1, dy: 0, len: b.w } : side === "E" ? { ax: b.x + b.w, ay: b.y, dx: 0, dy: 1, len: b.d } : side === "S" ? { ax: b.x + b.w, ay: b.y + b.d, dx: -1, dy: 0, len: b.w } : { ax: b.x, ay: b.y + b.d, dx: 0, dy: -1, len: b.d };
+/** global noktanın cephe boyunca konumu (cephenin saat yönündeki başlangıcından) */
+const eOf = (b: Block, side: Side, p: { x: number; y: number }) => {
+  const e = edgeOf(b, side);
+  return (p.x - e.ax) * e.dx + (p.y - e.ay) * e.dy;
+};
+const OUT: Record<Side, { x: number; y: number }> = { N: { x: 0, y: -1 }, E: { x: 1, y: 0 }, S: { x: 0, y: 1 }, W: { x: -1, y: 0 } };
+const SIDES: Side[] = ["N", "E", "S", "W"];
+
+function buildBlocks(W: number, D: number, wings: WWing[], warnings: string[]): (Block | null)[] {
+  const bl: (Block | null)[] = [{ x: 0, y: 0, w: W, d: D }];
+  wings.forEach((g, i) => {
+    const p = bl[g.to];
+    if (!p) { bl.push(null); warnings.push(`Kanat ${i + 1} bağlandığı blok olmadığı için eklenmedi.`); return; }
+    const al = g.align;
+    let r: Block;
+    if (g.side === "N") r = { x: p.x + al * (p.w - g.w), y: p.y - g.d, w: g.w, d: g.d };
+    else if (g.side === "S") r = { x: p.x + al * (p.w - g.w), y: p.y + p.d, w: g.w, d: g.d };
+    else if (g.side === "E") r = { x: p.x + p.w, y: p.y + al * (p.d - g.d), w: g.w, d: g.d };
+    else r = { x: p.x - g.w, y: p.y + al * (p.d - g.d), w: g.w, d: g.d };
+    const clash = bl.some((o) => o && Math.min(o.x + o.w, r.x + r.w) - Math.max(o.x, r.x) > 0.05 && Math.min(o.y + o.d, r.y + r.d) - Math.max(o.y, r.y) > 0.05);
+    if (clash) { bl.push(null); warnings.push(`Kanat ${i + 1} başka bir bloğun üstüne biniyor, eklenmedi. Cephesini ya da hizasını değiştir.`); return; }
+    const ov = g.side === "N" || g.side === "S" ? Math.min(p.x + p.w, r.x + r.w) - Math.max(p.x, r.x) : Math.min(p.y + p.d, r.y + r.d) - Math.max(p.y, r.y);
+    if (ov < 1.2) warnings.push(`Kanat ${i + 1} bağlandığı bloğa yeterince değmiyor (en az 1,2 m ortak duvar gerekir).`);
+    bl.push(r);
+  });
+  return bl;
+}
+
 export function generate(s: WSpec): WResult {
   const warnings: string[] = [];
   const multi = s.floors > 1;
-  let { W, D } = s.autoSize ? autoHouse(s) : { W: s.houseW, D: s.houseD };
-  if (multi && D < 7.5) { D = 7.5; warnings.push("Merdiven sığsın diye evin derinliği 7,5 m yapıldı."); }
+  const useAuto = s.autoSize && s.wings.length === 0;
+  let { W, D } = useAuto ? autoHouse(s) : { W: s.houseW, D: s.houseD };
+  if (multi && D < 7.5) { D = 7.5; warnings.push("Merdiven sığsın diye ana bloğun derinliği 7,5 m yapıldı."); }
   if (multi && W < 6) W = 6;
-  // arsa
-  const mx = Math.max(1.5, (s.plotW - W) / 2), my = Math.max(1.5, (s.plotD - D) / 2);
-  if (s.plotW < W + 3 || s.plotD < D + 3) warnings.push("Arsa evden küçük görünüyor; ev arsaya sığsın diye çevresine boşluk bırakıldı. Arsa ölçüsünü büyütebilirsin.");
+  const blocksN = buildBlocks(W, D, s.wings, warnings);
+  const blocks = blocksN.filter((b): b is Block => !!b);
+  const bIdx = blocksN.map((b) => (b ? blocks.indexOf(b) : -1));
+  void bIdx;
+  const minX = Math.min(...blocks.map((b) => b.x)), maxX = Math.max(...blocks.map((b) => b.x + b.w));
+  const minY = Math.min(...blocks.map((b) => b.y)), maxY = Math.max(...blocks.map((b) => b.y + b.d));
+  const Wt = maxX - minX, Dt = maxY - minY;
+  const mx = Math.max(1.5, (s.plotW - Wt) / 2), my = Math.max(1.5, (s.plotD - Dt) / 2);
+  if (s.plotW < Wt + 3 || s.plotD < Dt + 3) warnings.push("Arsa evden küçük görünüyor; ev arsaya sığsın diye çevresine boşluk bırakıldı. Arsa ölçüsünü büyütebilirsin.");
 
-  // ön (güney) bant derinliği: 1. katın oranına göre, tüm katlarda aynı
-  const split = (rs: WRoom[]) => {
+  const split = (rs: WRoom[], hol: boolean) => {
     const order = [...rs].sort((a, b) => RT[a.type].front - RT[b.type].front);
-    const tot = floorArea(rs, multi);
+    const tot = rs.reduce((a, r) => a + area(r), 0) + (hol ? 9 : 0);
     const south: WRoom[] = [], north: WRoom[] = [];
-    let acc = multi ? 9 : 0;
+    let acc = hol ? 9 : 0;
     for (const r of order) {
       if (acc < tot / 2 - 0.01 || south.length === 0) { south.push(r); acc += area(r); } else north.push(r);
     }
     if (!north.length && south.length > 1) north.push(south.pop()!);
-    return { south, north, accS: acc };
+    return { south, north };
   };
-  const f0 = split(s.rooms[0] ?? []);
-  const totSouth0 = f0.south.reduce((a, r) => a + area(r), 0) + (multi ? 9 : 0);
-  const tot0 = floorArea(s.rooms[0] ?? [], multi);
-  let ds = D * Math.min(0.62, Math.max(0.38, totSouth0 / tot0));
-  if (multi) ds = Math.min(Math.max(ds, 3.7), D - 2);
-  if (!f0.north.length) ds = D; // tek bant
+  /** odaları bloklara dağıt: gündüz odaları ana bloğa, kalanlar kanatlara; her bloğa en az bir oda */
+  const assign = (rs: WRoom[]): WRoom[][] => {
+    const nb = blocks.length;
+    const order = [...rs].sort((a, b) => RT[a.type].front - RT[b.type].front);
+    const capTot = blocks.reduce((a, b) => a + b.w * b.d, 0);
+    const total = order.reduce((a, r) => a + area(r), 0) + (multi ? 9 : 0);
+    const out: WRoom[][] = blocks.map(() => []);
+    let idx = 0;
+    blocks.forEach((b, bi) => {
+      const target = (total * (b.w * b.d)) / capTot;
+      let acc = bi === 0 && multi ? 9 : 0;
+      const last = bi === nb - 1;
+      while (idx < order.length && (last || out[bi].length === 0 || acc + area(order[idx]) / 2 <= target) && order.length - idx > (nb - 1 - bi) - (last ? 0 : 0) - 0) {
+        if (!last && order.length - idx <= nb - 1 - bi) break;
+        out[bi].push(order[idx]);
+        acc += area(order[idx]);
+        idx++;
+      }
+    });
+    while (idx < order.length) out[nb - 1].push(order[idx++]);
+    out.forEach((l, bi) => { if (!l.length) l.push({ id: uid(), type: "calisma", w: 3, d: 3 }); void bi; });
+    return out;
+  };
+
+  const f0rooms = assign(s.rooms[0] ?? []);
+  const f0split = split(f0rooms[0], multi);
+  const south0 = f0split.south.reduce((a, r) => a + area(r), 0) + (multi ? 9 : 0);
+  const tot0 = f0rooms[0].reduce((a, r) => a + area(r), 0) + (multi ? 9 : 0);
+  let ds0 = D * Math.min(0.62, Math.max(0.38, south0 / tot0));
+  if (multi) ds0 = Math.min(Math.max(ds0, 3.7), D - 2);
+  if (!f0split.north.length) ds0 = D;
 
   const floors: Floor[] = [];
   const report: WResult["rooms"] = [];
-  const counts: Record<string, number> = {};
-  const T = 0.3, Ti = 0.15;
+  const T = 0.3, Ti = 0.15, Ts = 0.2;
 
   for (let fi = 0; fi < s.floors; fi++) {
-    const rs = s.rooms[fi] ?? [];
-    const { south, north } = fi === 0 ? f0 : split(rs);
-    const bandS = north.length || fi !== 0 ? ds : D;
-    const cells: Cell[] = [];
+    const counts: Record<string, number> = {};
     const named = (r: WRoom) => {
       const base = RT[r.type].name;
-      const k = (counts[`${fi}${base}`] = (counts[`${fi}${base}`] ?? 0) + 1);
+      const k = (counts[base] = (counts[base] ?? 0) + 1);
       return k === 1 ? base : `${base} ${k}`;
     };
-    const place = (list: WRoom[], y0: number, y1: number, hol: boolean) => {
-      const wAvail = W - (hol ? HOL_W : 0);
-      const sum = list.reduce((a, r) => a + area(r), 0) || 1;
-      let x = 0;
-      list.forEach((r, i) => {
-        const w = i === list.length - 1 ? wAvail - x : (wAvail * area(r)) / sum;
-        cells.push({ x0: x, x1: x + w, y0, y1, name: named(r), type: r.type, want: area(r) });
-        x += w;
-      });
-      if (hol) cells.push({ x0: W - HOL_W, x1: W, y0, y1, name: "Hol", type: "hol", want: HOL_W * (y1 - y0), hub: true });
-    };
-    const hasNorth = north.length > 0 && bandS < D - 0.5;
-    if (!hasNorth) {
-      place([...south, ...north], 0, D, multi);
-    } else {
-      place(south, D - bandS, D, multi);
-      place(north, 0, D - bandS, false);
-    }
-    // bant yoksa ama kat çok katlı: yine de hol var, yukarıda yapıldı
-    const yDiv = hasNorth ? D - bandS : -1;
+    const per = fi === 0 ? f0rooms : assign(s.rooms[fi] ?? []);
+    // ---- yerleşim: her blok için hücreler (genel koordinat) ----
+    const cells: Cell[] = [];
+    blocks.forEach((blk, bi) => {
+      const rs = per[bi];
+      const hol = multi && bi === 0;
+      const cl = (x0: number, y0: number, x1: number, y1: number, r: WRoom | null, h = false) =>
+        cells.push({ x0: blk.x + x0, y0: blk.y + y0, x1: blk.x + x1, y1: blk.y + y1, b: bi, name: r ? named(r) : "Hol", type: r ? r.type : "hol", want: r ? area(r) : HOL_W * (y1 - y0), hub: h || undefined });
+      if (!hol && blk.w < 4.8 && rs.length > 1) {
+        // dar kanat: odalar alt alta
+        const order = [...rs].sort((a, b) => RT[a.type].front - RT[b.type].front);
+        const sum = order.reduce((a, r) => a + area(r), 0);
+        let y = 0;
+        order.forEach((r, i) => {
+          const d = i === order.length - 1 ? blk.d - y : (blk.d * area(r)) / sum;
+          cl(0, y, blk.w, y + d, r);
+          y += d;
+        });
+        return;
+      }
+      const sp = split(rs, hol);
+      let ds: number;
+      if (bi === 0) ds = ds0;
+      else {
+        const sS = sp.south.reduce((a, r) => a + area(r), 0), tt = rs.reduce((a, r) => a + area(r), 0) || 1;
+        ds = sp.north.length ? blk.d * Math.min(0.62, Math.max(0.38, sS / tt)) : blk.d;
+      }
+      const hasNorth = sp.north.length > 0 && ds < blk.d - 0.5;
+      const place = (list: WRoom[], y0: number, y1: number, withHol: boolean) => {
+        const wAvail = blk.w - (withHol ? HOL_W : 0);
+        const sum = list.reduce((a, r) => a + area(r), 0) || 1;
+        let x = 0;
+        list.forEach((r, i) => {
+          const w = i === list.length - 1 ? wAvail - x : (wAvail * area(r)) / sum;
+          cl(x, y0, x + w, y1, r);
+          x += w;
+        });
+        if (withHol) cl(blk.w - HOL_W, y0, blk.w, y1, null, true);
+      };
+      if (!hasNorth) place([...sp.south, ...sp.north], 0, blk.d, hol);
+      else {
+        place(sp.south, blk.d - ds, blk.d, hol);
+        place(sp.north, 0, blk.d - ds, false);
+      }
+    });
 
-    // duvarlar
+    // ---- duvarlar ----
     const walls: Wall[] = [];
-    const mk = (ax: number, ay: number, bx: number, by: number, t: number, color = "#7a7266") => {
-      const w: Wall = { id: uid(), a: { x: ax, y: ay }, b: { x: bx, y: by }, t, color };
+    const mk = (ax: number, ay: number, bx: number, by: number, t: number) => {
+      const w: Wall = { id: uid(), a: { x: ax, y: ay }, b: { x: bx, y: by }, t, color: "#7a7266" };
       walls.push(w);
       return w;
     };
-    const wn = mk(0, 0, W, 0, T), we = mk(W, 0, W, D, T), ws = mk(W, D, 0, D, T), ww = mk(0, D, 0, 0, T);
-    let wDiv: Wall | null = null;
-    if (hasNorth) wDiv = mk(0, yDiv, W, yDiv, Ti);
-    const vwalls: { w: Wall; x: number; y0: number; y1: number }[] = [];
-    const xs = (band: "S" | "N") => {
-      const inBand = cells.filter((c) => (hasNorth ? (band === "S" ? c.y0 >= yDiv - 0.01 : c.y1 <= yDiv + 0.01) : band === "S"));
-      return [...inBand].sort((a, b) => a.x0 - b.x0).slice(1).map((c) => ({ x: c.x0, y0: c.y0, y1: c.y1 }));
+    // blok dış kenarları: komşu blokla ortak kısım yalnız bir kez (iç duvar), kalanı dış duvar
+    const pieces = new Map<string, Piece[]>();
+    blocks.forEach((blk, bi) => {
+      for (const side of SIDES) {
+        const e = edgeOf(blk, side);
+        const cuts: { a: number; b: number; own: boolean }[] = [];
+        blocks.forEach((o, oi) => {
+          if (oi === bi) return;
+          const along = side === "N" || side === "S";
+          const touching = side === "N" ? Math.abs(o.y + o.d - blk.y) < 0.02 : side === "S" ? Math.abs(o.y - (blk.y + blk.d)) < 0.02 : side === "E" ? Math.abs(o.x - (blk.x + blk.w)) < 0.02 : Math.abs(o.x + o.w - blk.x) < 0.02;
+          if (!touching) return;
+          const lo = along ? Math.max(blk.x, o.x) : Math.max(blk.y, o.y);
+          const hi = along ? Math.min(blk.x + blk.w, o.x + o.w) : Math.min(blk.y + blk.d, o.y + o.d);
+          if (hi - lo < 0.05) return;
+          const p1 = along ? { x: lo, y: blk.y } : { x: blk.x, y: lo };
+          const p2 = along ? { x: hi, y: blk.y } : { x: blk.x, y: hi };
+          const ea = eOf(blk, side, p1), eb = eOf(blk, side, p2);
+          cuts.push({ a: Math.min(ea, eb), b: Math.max(ea, eb), own: bi < oi });
+        });
+        const bps = [0, e.len, ...cuts.flatMap((c) => [c.a, c.b])].filter((v) => v >= -0.001 && v <= e.len + 0.001).sort((a, b) => a - b);
+        const list: Piece[] = [];
+        for (let k = 0; k + 1 < bps.length; k++) {
+          const a = bps[k], b = bps[k + 1];
+          if (b - a < 0.02) continue;
+          const mid = (a + b) / 2;
+          const cut = cuts.find((c) => mid >= c.a && mid <= c.b);
+          if (cut && !cut.own) continue; // diğer blok çizer
+          const wl = mk(e.ax + e.dx * a, e.ay + e.dy * a, e.ax + e.dx * b, e.ay + e.dy * b, cut ? Ts : T);
+          list.push({ e0: a, e1: b, wall: wl, ext: !cut });
+        }
+        pieces.set(`${bi}${side}`, list);
+      }
+    });
+    // iç duvarlar: hücre kenarlarından, aynı doğru üzerindekiler birleştirilir
+    const hz = new Map<number, [number, number][]>(), vt = new Map<number, [number, number][]>();
+    const key = (v: number) => Math.round(v * 100);
+    for (const c of cells) {
+      const blk = blocks[c.b];
+      const onB = (v: number, w: number) => Math.abs(v - w) < 0.01;
+      if (!onB(c.y0, blk.y)) (hz.get(key(c.y0)) ?? hz.set(key(c.y0), []).get(key(c.y0))!).push([c.x0, c.x1]);
+      if (!onB(c.y1, blk.y + blk.d)) (hz.get(key(c.y1)) ?? hz.set(key(c.y1), []).get(key(c.y1))!).push([c.x0, c.x1]);
+      if (!onB(c.x0, blk.x)) (vt.get(key(c.x0)) ?? vt.set(key(c.x0), []).get(key(c.x0))!).push([c.y0, c.y1]);
+      if (!onB(c.x1, blk.x + blk.w)) (vt.get(key(c.x1)) ?? vt.set(key(c.x1), []).get(key(c.x1))!).push([c.y0, c.y1]);
+    }
+    const merge = (iv: [number, number][]) => {
+      const a = [...iv].sort((p, q) => p[0] - q[0]);
+      const out: [number, number][] = [];
+      for (const v of a) {
+        const l = out[out.length - 1];
+        if (l && v[0] <= l[1] + 0.01) l[1] = Math.max(l[1], v[1]);
+        else out.push([v[0], v[1]]);
+      }
+      return out;
     };
-    for (const v of [...xs("S"), ...(hasNorth ? xs("N") : [])]) vwalls.push({ w: mk(v.x, v.y0, v.x, v.y1, Ti), x: v.x, y0: v.y0, y1: v.y1 });
+    hz.forEach((iv, k) => merge(iv).forEach(([a, b]) => mk(a, k / 100, b, k / 100, Ti)));
+    vt.forEach((iv, k) => merge(iv).forEach(([a, b]) => mk(k / 100, a, k / 100, b, Ti)));
 
-    // açıklıklar
+    // ---- açıklıklar ----
     const openings: Opening[] = [];
-    const O = (wall: Wall, pos: number, w: number, h: number, sill: number, kind: "door" | "window", flip = false, shape: "rect" | "arch" = "rect") => {
-      const L = Math.hypot(wall.b.x - wall.a.x, wall.b.y - wall.a.y);
-      pos = Math.min(Math.max(pos, w / 2 + 0.2), L - w / 2 - 0.2);
-      openings.push({ id: uid(), wall: wall.id, pos, w, h, sill, kind, shape, flip, hinge: false });
+    const reserved: { wall: string; pos: number; half: number }[] = [];
+    const wLen = (w: Wall) => Math.hypot(w.b.x - w.a.x, w.b.y - w.a.y);
+    const O = (wall: Wall, pos: number, w: number, h: number, sill: number, kind: "door" | "window") => {
+      pos = Math.min(Math.max(pos, w / 2 + 0.1), wLen(wall) - w / 2 - 0.1);
+      openings.push({ id: uid(), wall: wall.id, pos, w, h, sill, kind, shape: "rect", flip: false, hinge: false });
+      return pos;
     };
-    // komşuluk ve kapılar (hub'dan BFS)
     const shared = (a: Cell, b: Cell) => {
       const ox = Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0), oy = Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0);
-      if (Math.abs(a.x1 - b.x0) < 0.02 || Math.abs(b.x1 - a.x0) < 0.02) return oy >= 1.2 ? { kind: "v" as const, x: Math.abs(a.x1 - b.x0) < 0.02 ? a.x1 : b.x1, c: Math.max(a.y0, b.y0) + oy / 2, len: oy } : null;
-      if (Math.abs(a.y1 - b.y0) < 0.02 || Math.abs(b.y1 - a.y0) < 0.02) return ox >= 1.2 ? { kind: "h" as const, y: Math.abs(a.y1 - b.y0) < 0.02 ? a.y1 : b.y1, c: Math.max(a.x0, b.x0) + ox / 2, len: ox } : null;
+      if (Math.abs(a.x1 - b.x0) < 0.02 || Math.abs(b.x1 - a.x0) < 0.02) return oy >= 1.2 ? { kind: "v" as const, at: Math.abs(a.x1 - b.x0) < 0.02 ? a.x1 : b.x1, c: Math.max(a.y0, b.y0) + oy / 2 } : null;
+      if (Math.abs(a.y1 - b.y0) < 0.02 || Math.abs(b.y1 - a.y0) < 0.02) return ox >= 1.2 ? { kind: "h" as const, at: Math.abs(a.y1 - b.y0) < 0.02 ? a.y1 : b.y1, c: Math.max(a.x0, b.x0) + ox / 2 } : null;
       return null;
     };
-    let hub = cells.find((c) => c.hub) ?? cells.find((c) => c.type === "salon" || c.type === "salonmutfak") ?? cells[0];
-    hub = hub ?? cells[0];
-    const seen = new Set<Cell>([hub]);
-    const q: Cell[] = [hub];
+    const doorAt = (sh: NonNullable<ReturnType<typeof shared>>) => {
+      const wl = walls.find((w) => (sh.kind === "v" ? Math.abs(w.a.x - sh.at) < 0.02 && Math.abs(w.b.x - sh.at) < 0.02 && Math.min(w.a.y, w.b.y) <= sh.c + 0.01 && Math.max(w.a.y, w.b.y) >= sh.c - 0.01 : Math.abs(w.a.y - sh.at) < 0.02 && Math.abs(w.b.y - sh.at) < 0.02 && Math.min(w.a.x, w.b.x) <= sh.c + 0.01 && Math.max(w.a.x, w.b.x) >= sh.c - 0.01));
+      if (!wl) return false;
+      O(wl, sh.kind === "v" ? Math.abs(sh.c - wl.a.y) : Math.abs(sh.c - wl.a.x), 0.9, 2.1, 0, "door");
+      return true;
+    };
+    const hubCell = cells.find((c) => c.hub) ?? cells.find((c) => c.b === 0 && (c.type === "salon" || c.type === "salonmutfak")) ?? cells[0];
+    const seen = new Set<Cell>([hubCell]);
+    const q: Cell[] = [hubCell];
     while (q.length) {
       const a = q.shift()!;
       for (const b of cells) {
@@ -181,53 +339,80 @@ export function generate(s: WSpec): WResult {
         if (!sh) continue;
         seen.add(b);
         q.push(b);
-        if (sh.kind === "v") {
-          const vw = vwalls.find((v) => Math.abs(v.x - sh.x) < 0.02 && v.y0 <= sh.c + 0.01 && v.y1 >= sh.c - 0.01);
-          if (vw) O(vw.w, sh.c - vw.y0, 0.9, 2.1, 0, "door", false, a.hub || b.hub ? "rect" : "rect");
-        } else if (wDiv) O(wDiv, sh.c, 0.9, 2.1, 0, "door");
+        if (!doorAt(sh)) warnings.push(`${floorName(fi)}: ${a.name} ile ${b.name} arasına kapı konamadı.`);
       }
     }
     for (const c of cells) if (!seen.has(c)) warnings.push(`${floorName(fi)}: ${c.name} hiçbir odaya bitişik değil, kapısı yok.`);
-    // dış cephe pencereleri ve giriş
+
+    // hücrenin dış cephe parçalarıyla kesişimi: [{side, piece, lo, hi}]
+    const cellExt = (c: Cell) => {
+      const blk = blocks[c.b];
+      const out: { side: Side; pc: Piece; lo: number; hi: number }[] = [];
+      for (const side of SIDES) {
+        let ca: number, cb: number;
+        if (side === "N") { if (Math.abs(c.y0 - blk.y) > 0.01) continue; ca = c.x0 - blk.x; cb = c.x1 - blk.x; }
+        else if (side === "S") { if (Math.abs(c.y1 - (blk.y + blk.d)) > 0.01) continue; ca = blk.x + blk.w - c.x1; cb = blk.x + blk.w - c.x0; }
+        else if (side === "E") { if (Math.abs(c.x1 - (blk.x + blk.w)) > 0.01) continue; ca = c.y0 - blk.y; cb = c.y1 - blk.y; }
+        else { if (Math.abs(c.x0 - blk.x) > 0.01) continue; ca = blk.y + blk.d - c.y1; cb = blk.y + blk.d - c.y0; }
+        for (const pc of pieces.get(`${c.b}${side}`) ?? []) {
+          if (!pc.ext) continue;
+          const lo = Math.max(ca, pc.e0), hi = Math.min(cb, pc.e1);
+          if (hi - lo > 0.3) out.push({ side, pc, lo, hi });
+        }
+      }
+      return out;
+    };
+    const posIn = (pc: Piece, e: number) => e - pc.e0;
+    const ptAt = (w: Wall, pos: number) => { const L = wLen(w); return { x: w.a.x + ((w.b.x - w.a.x) / L) * pos, y: w.a.y + ((w.b.y - w.a.y) / L) * pos }; };
+
+    // giriş kapısı (zemin kat)
+    type Ent = { side: Side; wall: Wall; pos: number; cell: Cell };
+    let entrance: Ent | null = null;
+    if (fi === 0) {
+      const cand = [hubCell, ...cells.filter((c) => c.b === 0 && c !== hubCell), ...cells.filter((c) => c.b !== 0)];
+      outer: for (const c of cand) {
+        const ex = cellExt(c);
+        for (const sd of ["S", "E", "W", "N"] as Side[]) {
+          const hit = ex.filter((e) => e.side === sd).sort((a, b) => b.hi - b.lo - (a.hi - a.lo))[0];
+          if (hit && hit.hi - hit.lo >= 1.4) {
+            const pos = O(hit.pc.wall, posIn(hit.pc, (hit.lo + hit.hi) / 2), 1.0, 2.2, 0, "door");
+            reserved.push({ wall: hit.pc.wall.id, pos, half: 1.0 });
+            entrance = { side: sd, wall: hit.pc.wall, pos, cell: c };
+            break outer;
+          }
+        }
+      }
+      if (!entrance) warnings.push("Zemin katta dışarıya açılan giriş kapısı konamadı.");
+    }
+    // balkonlar
     const balsHere = s.balconies.filter((b) => b.floor === fi);
-    const balOn = (side: string) => balsHere.find((b) => b.side === side);
-    const wallOf = { N: wn, E: we, S: ws, W: ww } as const;
-    // balkon kapısı bölgesi: pencere koyma
-    const posOf = (side: "N" | "E" | "S" | "W", c: Cell) => (side === "N" ? (c.x0 + c.x1) / 2 : side === "E" ? (c.y0 + c.y1) / 2 : side === "S" ? W - (c.x0 + c.x1) / 2 : D - (c.y0 + c.y1) / 2);
-    const lenOf = (side: string, c: Cell) => (side === "N" || side === "S" ? c.x1 - c.x0 : c.y1 - c.y0);
-    const balPos = (side: "N" | "E" | "S" | "W") => (side === "N" ? W / 2 : side === "E" ? D / 2 : side === "S" ? W / 2 : D / 2);
-    const exteriors: { side: "N" | "E" | "S" | "W"; c: Cell }[] = [];
-    for (const c of cells) {
-      if (c.y0 < 0.01) exteriors.push({ side: "N", c });
-      if (c.x1 > W - 0.01) exteriors.push({ side: "E", c });
-      if (c.y1 > D - 0.01) exteriors.push({ side: "S", c });
-      if (c.x0 < 0.01) exteriors.push({ side: "W", c });
-    }
-    // giriş kapısı: hub'ın güney cephesi, yoksa herhangi bir cephesi
-    const entrance = exteriors.find((e) => e.c === hub && e.side === "S") ?? exteriors.find((e) => e.c === hub);
-    if (fi === 0 && entrance) O(wallOf[entrance.side], posOf(entrance.side, hub) + (hub.hub ? 0 : 0), 1.0, 2.2, 0, "door");
-    const placedBalDoor = new Set<string>();
+    const balconies: NonNullable<Floor["balconies"]> = [];
+    const usedSide = new Set<Side>();
     for (const b of balsHere) {
-      if (placedBalDoor.has(b.side)) continue;
-      placedBalDoor.add(b.side);
-      O(wallOf[b.side], balPos(b.side), 0.9, 2.2, 0, "door");
+      let best: { pc: Piece } | null = null;
+      blocks.forEach((_, bi) => (pieces.get(`${bi}${b.side}`) ?? []).forEach((pc) => { if (pc.ext && (!best || pc.e1 - pc.e0 > best.pc.e1 - best.pc.e0)) best = { pc }; }));
+      const bp = best as { pc: Piece } | null;
+      if (!bp || bp.pc.e1 - bp.pc.e0 < 1.6) { warnings.push(`${floorName(fi)}: ${SIDE_TR[b.side]} cephede balkon için yeterli dış duvar yok.`); continue; }
+      const len = bp.pc.e1 - bp.pc.e0;
+      const pos = len / 2;
+      if (!usedSide.has(b.side)) { usedSide.add(b.side); O(bp.pc.wall, pos, 0.9, 2.2, 0, "door"); reserved.push({ wall: bp.pc.wall.id, pos, half: Math.min(b.w, len - 0.6) / 2 + 0.3 }); }
+      balconies.push({ id: uid(), wall: bp.pc.wall.id, pos, w: Math.min(b.w, len - 0.6), d: b.d, side: -1, rail: "bars", railH: 1.0, slabT: 0.15 });
     }
-    for (const e of exteriors) {
-      const L = lenOf(e.side, e.c);
-      const wall = wallOf[e.side];
-      const wet = e.c.type === "banyo" || e.c.type === "wc" || e.c.type === "depo";
-      if (e.c.type === "hol" && fi === 0) continue;
-      const nWin = L > 5 ? 2 : 1;
-      for (let k = 0; k < nWin; k++) {
-        const frac = nWin === 1 ? 0.5 : (k + 1) / 3;
-        const base = posOf(e.side, e.c);
-        const pos = e.side === "S" || e.side === "W" ? base - (frac - 0.5) * L : base + (frac - 0.5) * L;
-        const bpos = balOn(e.side) ? balPos(e.side) : -99;
-        if (Math.abs(pos - bpos) < 1.6) continue;
-        if (entrance && e.c === entrance.c && e.side === entrance.side && Math.abs(pos - posOf(e.side, e.c)) < 1.4) continue;
-        const ww_ = wet ? 0.6 : Math.min(1.3, L - 0.8);
-        if (ww_ < 0.5) continue;
-        O(wall, pos, ww_, wet ? 0.6 : 1.4, wet ? 1.5 : 0.9, "window");
+    // pencereler
+    for (const c of cells) {
+      const wet = c.type === "banyo" || c.type === "wc" || c.type === "depo";
+      if (c.type === "hol" && fi === 0) continue;
+      for (const e of cellExt(c)) {
+        const L = e.hi - e.lo;
+        const n = L > 5 ? 2 : 1;
+        for (let k = 0; k < n; k++) {
+          const frac = n === 1 ? 0.5 : (k + 1) / 3;
+          const pos = posIn(e.pc, e.lo + frac * L);
+          const ww = wet ? 0.6 : Math.min(1.3, L - 0.8);
+          if (ww < 0.5) continue;
+          if (reserved.some((r) => r.wall === e.pc.wall.id && Math.abs(r.pos - pos) < r.half + ww / 2 + 0.1)) continue;
+          O(e.pc.wall, pos, ww, wet ? 0.6 : 1.4, wet ? 1.5 : 0.9, "window");
+        }
       }
     }
     // odalar
@@ -280,7 +465,7 @@ export function generate(s: WSpec): WResult {
         }
       }
     }
-    // merdiven (üst kata çıkan, hol içinde)
+    // merdiven (iç, hol içinde)
     const stairs: Floor["stairs"] = [];
     const holC = cells.find((c) => c.hub && c.type === "hol");
     if (multi && holC && fi < s.floors - 1 && s.innerStair) {
@@ -288,48 +473,55 @@ export function generate(s: WSpec): WResult {
     }
     // dış merdivenler
     const pl = Math.max(0, s.plinth);
-    const ptOn = (side: "N" | "E" | "S" | "W", pos: number) => (side === "N" ? { x: pos, y: 0 } : side === "E" ? { x: W, y: pos } : side === "S" ? { x: W - pos, y: D } : { x: 0, y: D - pos });
-    const addExt = (side: "N" | "E" | "S" | "W", pos: number, rise: number) => {
-      const wall = wallOf[side];
-      const { stair } = placeExtStair(walls, wall, ptOn(side, pos), 1.0, rise);
+    const addExt = (wall: Wall, pos: number, side: Side, rise: number) => {
+      const { stair } = placeExtStair(walls, wall, ptAt(wall, pos), 1.0, rise, OUT[side]);
       stairs.push({ id: uid(), ...stair });
     };
-    if (fi === 0 && pl > 0.3 && s.entryStair && entrance) addExt(entrance.side, posOf(entrance.side, hub), pl);
+    const entranceNow = entrance as Ent | null;
+    if (fi === 0 && pl > 0.3 && s.entryStair && entranceNow) addExt(entranceNow.wall, entranceNow.pos, entranceNow.side, pl);
     if (fi === 0 && pl > 0.3 && !s.entryStair) warnings.push("Ev yüksekte ama girişe dış merdiven seçilmedi; girişe çıkış yok.");
     if (fi === 1 && s.upperExt) {
       const rise = pl + (floors[0]?.height ?? s.height);
-      const hol2 = cells.find((c) => c.hub && c.type === "hol");
-      const side: "E" | "W" = "E";
-      const pos = hol2 ? posOf(side, hol2) : D / 2;
-      if (balOn(side)) warnings.push("1. kat doğu duvarında balkon var; dış merdiven de oraya konuldu, yerini editörde kaydırabilirsin.");
-      for (let k = openings.length - 1; k >= 0; k--) if (openings[k].wall === wallOf[side].id && openings[k].kind === "window" && Math.abs(openings[k].pos - pos) < 1.3) openings.splice(k, 1);
-      O(wallOf[side], pos, 1.0, 2.2, 0, "door");
-      addExt(side, pos, rise);
+      let best: { pc: Piece; pos: number; score: number } | null = null;
+      blocks.forEach((_, bi) => (pieces.get(`${bi}E`) ?? []).forEach((pc) => {
+        if (!pc.ext) return;
+        let pos = (pc.e1 - pc.e0) / 2;
+        const hl = holC ? cellExt(holC).find((e) => e.side === "E" && e.pc === pc) : undefined;
+        if (hl) pos = posIn(pc, (hl.lo + hl.hi) / 2);
+        const score = (hl ? 100 : 0) + (pc.e1 - pc.e0);
+        const cur = best as { score: number } | null;
+        if (!cur || score > cur.score) best = { pc, pos, score };
+      }));
+      const bb = best as { pc: Piece; pos: number; score: number } | null;
+      if (!bb || bb.pc.e1 - bb.pc.e0 < 1.4) warnings.push("1. kata dış merdiven için sağ cephede yeterli dış duvar yok.");
+      else {
+        for (let k = openings.length - 1; k >= 0; k--) if (openings[k].wall === bb.pc.wall.id && openings[k].kind === "window" && Math.abs(openings[k].pos - bb.pos) < 1.3) openings.splice(k, 1);
+        const pos = O(bb.pc.wall, bb.pos, 1.0, 2.2, 0, "door");
+        addExt(bb.pc.wall, pos, "E", rise);
+      }
     }
-    // balkonlar
-    const balconies: NonNullable<Floor["balconies"]> = balsHere.map((b) => {
-      const wall = wallOf[b.side];
-      return { id: uid(), wall: wall.id, pos: balPos(b.side), w: Math.min(b.w, (b.side === "N" || b.side === "S" ? W : D) - 0.6), d: b.d, side: -1, rail: "bars", railH: 1.0, slabT: 0.15 };
-    });
     floors.push({ id: uid(), name: floorName(fi), height: s.height, walls, openings, rooms, stairs, items, cols: [], balconies });
   }
 
+  const cx = (minX + maxX) / 2;
   const raw = {
-    plot: { points: [{ x: -mx, y: -my }, { x: W + mx, y: -my }, { x: W + mx, y: D + my }, { x: -mx, y: D + my }], closed: true },
+    plot: { points: [{ x: minX - mx, y: minY - my }, { x: maxX + mx, y: minY - my }, { x: maxX + mx, y: maxY + my }, { x: minX - mx, y: maxY + my }], closed: true },
     snap: 0.1, defT: 0.25,
-    roof: { kind: s.roof, pitch: s.pitch, overhang: 0.5, ridge: "auto", color: "#a5523a", tex: "tile" },
+    roof: { kind: s.roof, pitch: s.pitch, overhang: 0.5, ridge: "auto", color: "#a5523a", tex: "tile", ...(blocks.length > 1 ? { parts: blocks.map((b) => ({ x: b.x, y: b.y, w: b.w, d: b.d })) } : {}) },
     floors, custom: [], build: { ...defaultBuild(), plinth: Math.max(0, s.plinth) },
     fin: { extColor: "#efe6d6", extTex: "plain", intColor: "#f4f0e8", intTex: "plain", doorColor: "#7a4a2a", frameColor: "#ffffff", groundColor: "#8fb45f", baseColor: "#a39b8e", baseTex: "stone" },
     env: {
       sun: { month: 6, hour: 15, lat: 52, north: 0, shadows: true },
       objs: [
-        { id: uid(), rot: 0, kind: "road", name: "Yol", x: W / 2, y: D + my + 2.5, w: s.plotW + 12, d: 5, h: 0.05, color: "#5e5e5e" },
-        { id: uid(), rot: 0, kind: "tree", name: "Ağaç", x: -mx + 1.8, y: -my + 1.8, w: 3.5, d: 3.5, h: 6.5, color: "#5b8f3c" },
-        { id: uid(), rot: 0, kind: "pine", name: "Çam", x: W + mx - 1.8, y: -my + 1.8, w: 2.8, d: 2.8, h: 8.5, color: "#2f6a3a" },
-        { id: uid(), rot: 0, kind: "fence", name: "Çit", x: W / 2, y: D + my, w: W + 2 * mx, d: 0.08, h: 1, color: "#8a6a4a" },
+        { id: uid(), rot: 0, kind: "road", name: "Yol", x: cx, y: maxY + my + 2.5, w: s.plotW + 12, d: 5, h: 0.05, color: "#5e5e5e" },
+        { id: uid(), rot: 0, kind: "tree", name: "Ağaç", x: minX - mx + 1.8, y: minY - my + 1.8, w: 3.5, d: 3.5, h: 6.5, color: "#5b8f3c" },
+        { id: uid(), rot: 0, kind: "pine", name: "Çam", x: maxX + mx - 1.8, y: minY - my + 1.8, w: 2.8, d: 2.8, h: 8.5, color: "#2f6a3a" },
+        { id: uid(), rot: 0, kind: "fence", name: "Çit", x: cx, y: maxY + my, w: Wt + 2 * mx, d: 0.08, h: 1, color: "#8a6a4a" },
       ],
     },
   };
   const full = normalizeFull(raw);
-  return { full, warnings, rooms: report, houseW: W, houseD: D };
+  return { full, warnings, rooms: report, houseW: Wt, houseD: Dt };
 }
+
+const SIDE_TR: Record<Side, string> = { N: "arka", E: "sağ", S: "ön", W: "sol" };

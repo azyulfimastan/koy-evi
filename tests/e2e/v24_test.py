@@ -21,7 +21,7 @@ def run(w,h,sfx):
     pg.screenshot(path=f"{OUT}{tag}-{sfx}-01-sihirbaz3d.png")
     pg.click(".wztabs button:text-is('2D plan')"); pg.wait_for_timeout(500)
     pg.screenshot(path=f"{OUT}{tag}-{sfx}-02-sihirbaz2d.png")
-    pg.click(".wzsteps button >> nth=3"); pg.fill(".wname","Kaideli "+sfx)
+    pg.click(".wzsteps button >> nth=4"); pg.fill(".wname","Kaideli "+sfx)
     pg.click(".wnav .go"); pg.wait_for_selector(".cv canvas"); pg.wait_for_timeout(1500)
     res["editor"]=True
     pg.click(".tools.modes button:text-is('Dış merdiven')"); pg.wait_for_timeout(300)

@@ -126,7 +126,7 @@ export function drawStair(g: CanvasRenderingContext2D, st: Stair, height: number
 }
 
 /** Dış merdiveni, dokunulan duvarın dış yüzüne yerleştirir: üst ucu (sahanlık) duvara bitişik, basamaklar dışarı doğru */
-export function placeExtStair(walls: { a: { x: number; y: number }; b: { x: number; y: number }; t: number }[], w: { a: { x: number; y: number }; b: { x: number; y: number }; t: number }, p: { x: number; y: number }, width: number, rise: number): { stair: Omit<Stair, "id">; pos: number; L: number } {
+export function placeExtStair(walls: { a: { x: number; y: number }; b: { x: number; y: number }; t: number }[], w: { a: { x: number; y: number }; b: { x: number; y: number }; t: number }, p: { x: number; y: number }, width: number, rise: number, outward?: { x: number; y: number }): { stair: Omit<Stair, "id">; pos: number; L: number } {
   const L = Math.hypot(w.b.x - w.a.x, w.b.y - w.a.y) || 1;
   const u = { x: (w.b.x - w.a.x) / L, y: (w.b.y - w.a.y) / L };
   let tt = ((p.x - w.a.x) * u.x + (p.y - w.a.y) * u.y);
@@ -136,7 +136,8 @@ export function placeExtStair(walls: { a: { x: number; y: number }; b: { x: numb
   const pts = walls.flatMap((q) => [q.a, q.b]);
   const c = { x: pts.reduce((s, q) => s + q.x, 0) / pts.length, y: pts.reduce((s, q) => s + q.y, 0) / pts.length };
   let n = { x: -u.y, y: u.x };
-  if ((mid.x - c.x) * n.x + (mid.y - c.y) * n.y < 0) n = { x: -n.x, y: -n.y };
+  if (outward) { if (n.x * outward.x + n.y * outward.y < 0) n = { x: -n.x, y: -n.y }; }
+  else if ((mid.x - c.x) * n.x + (mid.y - c.y) * n.y < 0) n = { x: -n.x, y: -n.y };
   const rot = Math.round((Math.atan2(-n.x, n.y) * 180) / Math.PI + 360) % 360;
   const st: Stair = { id: "", kind: "straight", x: 0, y: 0, rot, w: width, mirror: false, ext: true };
   const D = stairBox(st, rise).D;

@@ -160,7 +160,7 @@ export function computeReport(f: FullData): Report {
   add("Tavan boyası / sıva", ceil, "m²");
   for (const [k, a] of floorTex) add(`Zemin – ${k === "none" ? "Kaplamasız (varsayılan)" : nm(FLOOR_TEX, k)}`, a, "m²", k === "none" ? undefined : `+%${WASTE * 100} fire ile ${fmt(a * (1 + WASTE))} m²`);
   if (ri) {
-    const foot = (ri.x1 - ri.x0) * (ri.y1 - ri.y0);
+    const foot = ri.foot;
     const cos = Math.cos((f.roof.pitch * Math.PI) / 180);
     const surf = f.roof.kind === "flat" ? foot : foot / Math.max(cos, 0.2);
     add(`Çatı kaplaması – ${nm(ROOF_TEX, f.roof.tex)}`, surf, "m²", `+%${WASTE * 100} fire ile ${fmt(surf * (1 + WASTE))} m²`);
