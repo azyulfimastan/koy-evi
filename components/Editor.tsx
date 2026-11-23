@@ -18,6 +18,7 @@ import type { Finish, EnvKind, EnvObj } from "@/lib/types";
 import { ENV_KINDS, MONTHS, compassName, newEnv, sunPos } from "@/lib/env";
 import type { Pick3, View3DCmd, Walk } from "./View3D";
 
+import Replay from "./Replay";
 import Tour, { type DemoKind } from "./Tour";
 import Guide from "./Guide";
 const Backup = dynamic(() => import("./Backup"), { ssr: false });
@@ -71,6 +72,9 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
   const [showBak, setShowBak] = useState(false);
   const [guideOpen, setGuideOpen] = useState(false);
   const [tourOpen, setTourOpen] = useState(false);
+  const [replayOpen, setReplayOpen] = useState(false);
+  const [helpMenu, setHelpMenu] = useState(false);
+  const [helpPos, setHelpPos] = useState({ top: 100, right: 8 });
   const [more, setMore] = useState(() => {
     try {
       return localStorage.getItem("kte_fold") === "open" || window.innerWidth >= 900; // geniş ekranda hepsi açık
@@ -1450,7 +1454,15 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
           {is3d ? <>◧ <span className="lg">2D plana dön</span><span className="sm">2D</span></> : <>🧊 <span className="lg">3D görünüm</span><span className="sm">3D</span></>}
         </button>
         <button className="v3btn rep" onClick={() => setShowRep(true)}>📋 Rapor</button>
-        <button className="v3btn gd tourbtn" onClick={() => { setTourOpen(true); setIs3d(false); }} title="Nasıl kullanılır? Adım adım demo">🎬</button>
+        <span className="helpwrap">
+          <button className="v3btn gd tourbtn" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setHelpPos({ top: r.bottom + 6, right: Math.max(8, window.innerWidth - r.right) }); setHelpMenu((v) => !v); }} aria-expanded={helpMenu} title="Yardım: demo ve adım adım izle">🎬</button>
+          {helpMenu && (
+            <div className="helpmenu" role="menu" style={{ top: helpPos.top, right: helpPos.right }}>
+              <button role="menuitem" onClick={() => { setHelpMenu(false); setTourOpen(true); setIs3d(false); }}>🎬 Nasıl kullanılır? (demo)</button>
+              <button role="menuitem" className="replaybtn" onClick={() => { setHelpMenu(false); setReplayOpen(true); }}>🎞️ Bu evi adım adım izle</button>
+            </div>
+          )}
+        </span>
       </div>
       {!is3d && (<>
       <div className="tools modes">
@@ -1497,6 +1509,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
           }}
         />
       )}
+      {replayOpen && <Replay full={full} name={name} onClose={() => setReplayOpen(false)} />}
       {tourOpen && <Tour onClose={() => setTourOpen(false)} onStep={(t) => { setIs3d(false); setShowRep(false); if (t) chooseTool(t as Tool); }} onDemo={(k) => { const m = applyDemo(k); window.setTimeout(() => fit(), 80); return m; }} />}
       {showBak && (
         <Backup

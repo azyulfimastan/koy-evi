@@ -36,6 +36,7 @@ Sonra `tests/e2e` klasöründen (görüntüler `tests/shots/` içine düşer):
 | `cizim_test.py` | duvar çizerken 90° kilidi, rakamla ölçü, çift tıkla ölçü, 90° yap |
 | `villa_gorsel.py`, `ogretici_gorsel.py` | süper ev şablonu ve öğretici için ekran görüntüleri |
 | `performans_test.py` | 3 katlı büyük evde 3D kurulum süresi |
+| `v22_test.py` | adım adım izle: ileri/geri, aşama atlama, oynat, Evlerim listesinden izleme |
 | `foto_test.py` | gerçekçi fotoğraf modu (küçük boyutta) |
 | `gorsel.py`, `liste_gorsel.py` | örnek evin ekran görüntüleri |
 

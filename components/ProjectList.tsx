@@ -5,6 +5,9 @@ import { HouseLogo } from "./HouseArt";
 import { TEMPLATES } from "@/lib/templates";
 import Summary from "./Summary";
 import Compare from "./Compare";
+import Replay from "./Replay";
+import { normalizeFull } from "@/lib/types";
+import type { FullData } from "@/lib/types";
 import { downloadBackup, parseBackup, stamp } from "@/lib/backup";
 
 type Item = { id: string; name: string; updatedAt: number; thumb?: string };
@@ -33,6 +36,13 @@ export default function ProjectList({ onOpen, onLogout }: { onOpen: (id: string)
   const [sel, setSel] = useState<string[]>([]);
   const [cmp, setCmp] = useState(false);
   const [sumId, setSumId] = useState<string | null>(null);
+  const [rp, setRp] = useState<{ name: string; full: FullData } | null>(null);
+  async function watch(p: Item) {
+    const r = await fetch("/api/projects/" + p.id);
+    if (!r.ok) return setErr("Ev yüklenemedi.");
+    const j = await r.json();
+    setRp({ name: j.name, full: normalizeFull(j.data) });
+  }
   const toggle = (id: string) => setSel((a) => (a.includes(id) ? a.filter((x) => x !== id) : a.length >= 4 ? a : [...a, id]));
 
   async function duplicate(p: Item) {
@@ -212,6 +222,7 @@ export default function ProjectList({ onOpen, onLogout }: { onOpen: (id: string)
             <div className="pactions">
               <button onClick={() => duplicate(p)}>📋 Alternatif kopyala</button>
               <button onClick={() => setSumId(p.id)}>📄 Özet</button>
+              <button onClick={() => watch(p)}>🎞️ Adım adım izle</button>
             </div>
           </div>
         ))}
@@ -224,6 +235,7 @@ export default function ProjectList({ onOpen, onLogout }: { onOpen: (id: string)
         </div>
       )}
       {cmp && <Compare ids={sel} onClose={() => setCmp(false)} onSummary={(id) => { setCmp(false); setSumId(id); }} />}
+      {rp && <Replay full={rp.full} name={rp.name} onClose={() => setRp(null)} />}
       {sumId && <Summary id={sumId} onClose={() => { setSumId(null); load(); }} />}
 
       {!!trash?.length && (

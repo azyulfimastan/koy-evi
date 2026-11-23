@@ -14,7 +14,7 @@ def run(w,h,sfx):
     pg.goto(BASE); pg.fill("input[type=password]",PW); pg.click("button.primary"); pg.wait_for_selector(".page")
     pg.fill(".newp input","Demo "+sfx); pg.click(".newp button.primary")
     pg.wait_for_selector(".cv canvas"); pg.wait_for_timeout(800)
-    pg.click(".tourbtn"); pg.wait_for_selector(".tcard")
+    pg.click(".tourbtn"); pg.click(".helpmenu button >> nth=0"); pg.wait_for_selector(".tcard")
     pg.screenshot(path=f"{OUT}{tag}-{sfx}-01-hosgeldin.png")
     msgs=[]
     for n in range(1,7):

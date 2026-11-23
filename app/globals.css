@@ -341,3 +341,25 @@ button.ghost { border-color: transparent; background: transparent; font-size: 17
 .side h4.foldh::after { content: "▴"; font-size: 12px; color: #8a8576; }
 .side h4.foldh.closed::after { content: "▾"; }
 .side .fold-hide { display: none !important; }
+
+.replay { position: fixed; inset: 0; z-index: 850; background: #f6f2ea; display: flex; flex-direction: column; }
+.rpbar { display: flex; gap: 8px; align-items: center; padding: 8px 12px; background: #eaf3dd; border-bottom: 1px solid #c9dcb0; }
+.rpbar b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rpfl { background: #2a2a26; color: #fff; border-radius: 10px; padding: 4px 10px; font-size: 13px; }
+.rpbar button { padding: 8px 12px; border-radius: 10px; border: 1px solid #b9cfa0; background: #fff; font-size: 14px; }
+.rpcv { flex: 1; min-height: 0; position: relative; background: #f3efe4; }
+.rpcv canvas { display: block; }
+.rpcard { background: #fffdf6; border-top: 1px solid #e6dfd0; padding: 10px 14px 14px; display: flex; flex-direction: column; gap: 6px; box-shadow: 0 -4px 16px rgba(0,0,0,.08); }
+.rpmeta { display: flex; justify-content: space-between; font-size: 12px; color: #8a8576; }
+.rpcard b { font-size: 16px; color: #2f5320; }
+.rpcard p { margin: 0; font-size: 14px; line-height: 1.4; color: #4a463c; min-height: 40px; }
+.rpcard input[type=range] { width: 100%; }
+.rprow { display: flex; gap: 6px; flex-wrap: wrap; }
+.rprow button { padding: 12px 14px; border-radius: 12px; border: 1px solid #c9bfa6; background: #fff; font-size: 15px; }
+.rprow button.big { flex: 1; font-weight: 700; }
+.rprow button.go { background: #2f6b3a; color: #fff; border-color: #2f6b3a; }
+.rprow button:disabled { opacity: .4; }
+
+.helpwrap { position: relative; display: inline-flex; }
+.helpmenu { position: fixed; z-index: 900; background: #fffdf6; border: 1px solid #d8d0bd; border-radius: 14px; box-shadow: 0 6px 24px rgba(0,0,0,.25); padding: 6px; display: flex; flex-direction: column; gap: 4px; min-width: 250px; }
+.helpmenu button { text-align: left; padding: 12px 14px; border-radius: 10px; border: none; background: #f4efe2; font-size: 15px; white-space: nowrap; }
