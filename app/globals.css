@@ -280,3 +280,18 @@ button.ghost { border-color: transparent; background: transparent; font-size: 17
 .stagebox .row { display: flex; gap: 6px; flex-wrap: wrap; }
 
 .h3handle { position: absolute; z-index: 6; width: 44px; height: 44px; margin: -22px 0 0 -22px; border-radius: 50%; background: #ff8a1f; color: #fff; font-size: 22px; font-weight: 700; align-items: center; justify-content: center; border: 3px solid #fff; box-shadow: 0 2px 8px rgba(0,0,0,.4); cursor: ns-resize; touch-action: none; user-select: none; }
+
+.tour { position: fixed; inset: 0; z-index: 900; pointer-events: none; }
+.tour .tspot { position: fixed; border-radius: 12px; box-shadow: 0 0 0 9999px rgba(20,18,12,.55), 0 0 0 3px #ff8a1f inset; pointer-events: none; animation: tpulse 1.4s ease-in-out infinite; }
+@keyframes tpulse { 50% { box-shadow: 0 0 0 9999px rgba(20,18,12,.55), 0 0 0 5px #ffd08a inset; } }
+.tour .tcard { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); width: min(460px, calc(100vw - 20px)); background: #fffdf6; border-radius: 16px; padding: 12px 14px; box-shadow: 0 6px 28px rgba(0,0,0,.35); pointer-events: auto; display: flex; flex-direction: column; gap: 6px; }
+.tour .tcard b { font-size: 16px; color: #2f5320; }
+.tour .tcard p { margin: 0; font-size: 14px; line-height: 1.4; }
+.tour .tmsg { color: #8a4b0f; font-weight: 600; }
+.tour .trow { display: flex; gap: 6px; flex-wrap: wrap; }
+.tour .trow button { padding: 9px 12px; border-radius: 10px; border: 1px solid #c9bfa6; background: #fff; font-size: 14px; }
+.tour .trow button.go { background: #2f6b3a; color: #fff; border-color: #2f6b3a; }
+.tour .trow button:disabled { opacity: .4; }
+.tour .tdots { display: flex; gap: 3px; }
+.tour .tdots i { flex: 1; height: 4px; border-radius: 2px; background: #e3dccb; }
+.tour .tdots i.ok { background: #8dbb7a; } .tour .tdots i.cur { background: #ff8a1f; }

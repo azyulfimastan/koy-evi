@@ -18,6 +18,7 @@ import type { Finish, EnvKind, EnvObj } from "@/lib/types";
 import { ENV_KINDS, MONTHS, compassName, newEnv, sunPos } from "@/lib/env";
 import type { Pick3, View3DCmd, Walk } from "./View3D";
 
+import Tour, { type DemoKind } from "./Tour";
 import Guide from "./Guide";
 const Backup = dynamic(() => import("./Backup"), { ssr: false });
 const Report = dynamic(() => import("./Report"), { ssr: false });
@@ -69,6 +70,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
   const [showRep, setShowRep] = useState(false);
   const [showBak, setShowBak] = useState(false);
   const [guideOpen, setGuideOpen] = useState(false);
+  const [tourOpen, setTourOpen] = useState(false);
   const is3dRef = useRef(is3d);
   is3dRef.current = is3d;
   const [v3, setV3] = useState<V3>({ floors: "all", roof: true, items: true, sec: "none" });
@@ -309,8 +311,10 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
     const b = bounds(pts);
     const w = Math.max(b.maxX - b.minX, 1);
     const h = Math.max(b.maxY - b.minY, 1);
-    const s = Math.min((W - 140) / w, (H - 140) / h);
-    setView({ s, ox: W / 2 - ((b.minX + b.maxX) / 2) * s, oy: H / 2 - ((b.minY + b.maxY) / 2) * s });
+    const pad = W < 600 ? 50 : 140;
+    const extra = tourOpen ? Math.min(230, H * 0.3) : 0; // demo kartı altta yer kaplar
+    const s = Math.min((W - pad) / w, (H - pad - extra) / h);
+    setView({ s, ox: W / 2 - ((b.minX + b.maxX) / 2) * s, oy: (H - extra) / 2 - ((b.minY + b.maxY) / 2) * s });
   }
   const toWorld = (sx: number, sy: number): Pt => ({
     x: (sx - viewRef.current.ox) / viewRef.current.s,
@@ -1112,6 +1116,43 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
     }
     setSel(null);
   }
+  /** Demo: o adımı plana örnek olarak uygular (Geri al ile silinir) */
+  function applyDemo(kind: DemoKind): string {
+    const d = dataRef.current;
+    const ptsAll = d.walls.flatMap((w) => [w.a, w.b]);
+    const bb = ptsAll.length ? bounds(ptsAll) : null;
+    if (kind === "plot") {
+      if (d.plot.closed && d.plot.points.length >= 3) return "Arsa zaten çizili.";
+      apply({ ...d, plot: { points: [{ x: -3, y: -3 }, { x: 11, y: -3 }, { x: 11, y: 8.5 }, { x: -3, y: 8.5 }], closed: true } });
+      return "Arsa çizildi. İstersen Geri al ile silebilirsin.";
+    }
+    if (kind === "walls") {
+      if (d.walls.length) return "Bu katta zaten duvar var.";
+      const P = [{ x: 0, y: 0 }, { x: 8, y: 0 }, { x: 8, y: 5.5 }, { x: 0, y: 5.5 }];
+      const ws: Wall[] = P.map((a, k) => ({ id: uid(), a, b: P[(k + 1) % 4], t: d.defT, color: "#cccccc" }));
+      apply({ ...d, walls: ws });
+      return "4 duvar çizildi (8 × 5,5 m).";
+    }
+    if (!d.walls.length || !bb) return "Önce duvar adımındaki “Örnek duvarları çiz”e bas.";
+    if (kind === "door" || kind === "window") {
+      const w = kind === "door" ? d.walls[Math.min(2, d.walls.length - 1)] : d.walls[0];
+      const L = Math.hypot(w.b.x - w.a.x, w.b.y - w.a.y);
+      const o: Opening = kind === "door" ? { id: uid(), wall: w.id, pos: L / 2, w: 1, h: 2.1, sill: 0, kind: "door", shape: "rect", flip: false, hinge: false } : { id: uid(), wall: w.id, pos: L / 2, w: 1.4, h: 1.3, sill: 0.9, kind: "window", shape: "rect", flip: false, hinge: false };
+      apply({ ...d, openings: [...d.openings, o] });
+      return kind === "door" ? "Kapı eklendi." : "Pencere eklendi.";
+    }
+    const c = { x: (bb.minX + bb.maxX) / 2, y: (bb.minY + bb.maxY) / 2 };
+    if (kind === "room") {
+      if (d.rooms.length) return "Bu katta zaten oda var.";
+      apply({ ...d, rooms: [{ id: uid(), name: "Salon", seed: c, color: "#f3d9a6", floor: "parquet" }] });
+      return "Oda oluştu; alanı otomatik hesaplandı.";
+    }
+    const cat = CATALOG.find((q) => q.key === "sofa3");
+    if (!cat) return "";
+    const it: Item = { id: uid(), key: cat.key, name: cat.name, shape: cat.shape, x: c.x, y: c.y + 1.2, rot: 0, w: cat.w, d: cat.d, h: cat.h, elev: cat.elev ?? 0, color: cat.color };
+    apply({ ...d, items: [...d.items, it] });
+    return "Kanepe eklendi. Seç aracıyla sürükleyip taşıyabilirsin.";
+  }
   function chooseTool(t: Tool) {
     setTool(t);
     setChain(null);
@@ -1349,6 +1390,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
         </button>
         <button className="v3btn rep" onClick={() => setShowRep(true)}>📋 Rapor</button>
         <button className="v3btn gd" onClick={() => setGuideOpen(true)} title="Adım adım yönlendirme">🧭</button>
+        <button className="v3btn gd tourbtn" onClick={() => { setTourOpen(true); setIs3d(false); }} title="Nasıl kullanılır? Adım adım demo">🎬</button>
       </div>
       {!is3d && (<>
       <div className="tools modes">
@@ -1392,6 +1434,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
           }}
         />
       )}
+      {tourOpen && <Tour onClose={() => setTourOpen(false)} onStep={(t) => { setIs3d(false); setShowRep(false); if (t) chooseTool(t as Tool); }} onDemo={(k) => { const m = applyDemo(k); window.setTimeout(() => fit(), 80); return m; }} />}
       {showBak && (
         <Backup
           id={id}
