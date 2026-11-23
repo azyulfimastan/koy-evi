@@ -1,6 +1,6 @@
 export type Pt = { x: number; y: number };
 export type Plot = { points: Pt[]; closed: boolean };
-export type Wall = { id: string; a: Pt; b: Pt; t: number; color: string; ext?: string; int?: string };
+export type Wall = { id: string; a: Pt; b: Pt; t: number; color: string; ext?: string; int?: string; h?: number /* bu duvarın yüksekliği (m); yoksa kat yüksekliği */ };
 export type Opening = {
   id: string;
   wall: string;

@@ -272,7 +272,7 @@ function wallExt(walls: Floor["walls"]) {
 
 function buildWalls(fl: Floor, base: number, m: Mats, cut: boolean, g: THREE.Group, level = 0) {
   const exts = wallExt(fl.walls);
-  const H = fl.height;
+  const FH = fl.height;
   const isOut = outsideFn(fl);
   const bExt = mkB();
   const bInt = mkB();
@@ -293,6 +293,7 @@ function buildWalls(fl: Floor, base: number, m: Mats, cut: boolean, g: THREE.Gro
   let wi = 0;
   for (const w of fl.walls) {
     wi++;
+    const H = Math.max(0.3, Math.min(8, w.h ?? FH));
     const { L, u, n } = wallGeom(w, undefined);
     const [ea, eb] = exts.get(w.id) ?? [0, 0];
     if (L < 0.01 || L + ea + eb < 0.01) continue;

@@ -1691,6 +1691,20 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
                   decimals={0}
                   onCommit={(v) => patchWall(selWall.id, (w) => ({ ...w, t: round3(Math.max(0.05, Math.min(1.5, v / 100))) }))}
                 />
+                <NumField
+                  key={selWall.id + ":h:" + (selWall.h ?? "kat") + data.height}
+                  label={selWall.h ? "Yükseklik (cm) · özel" : "Yükseklik (cm) · kat ile aynı"}
+                  value={(selWall.h ?? data.height) * 100}
+                  decimals={0}
+                  onCommit={(v) =>
+                    patchWall(selWall.id, (w) => {
+                      const h = round3(Math.max(0.3, Math.min(8, v / 100)));
+                      const { h: _old, ...rest } = w;
+                      void _old;
+                      return Math.abs(h - data.height) < 0.001 ? rest : { ...rest, h };
+                    })
+                  }
+                />
                 <label className="edge">
                   <span>Plan rengi (2D)</span>
                   <input type="color" value={selWall.color} onChange={(e) => patchWall(selWall.id, (w) => ({ ...w, color: e.target.value }))} />
@@ -1997,7 +2011,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
                   <span>Kat adı</span>
                   <input value={data.name} onChange={(e) => setData({ ...data, name: e.target.value })} onBlur={() => bump((n) => n + 1)} />
                 </label>
-                <NumField key={"fh" + fi + data.height} label="Kat yüksekliği (cm)" value={data.height * 100} decimals={0}
+                <NumField key={"fh" + fi + data.height} label="Tavan / kat yüksekliği (cm)" value={data.height * 100} decimals={0}
                   onCommit={(v) => apply({ ...data, height: round3(Math.max(2, Math.min(5, v / 100))) })} />
                 <div className="row">
                   {fi > 0 && <button onClick={copyBelow}>Alt katın duvarlarını kopyala</button>}

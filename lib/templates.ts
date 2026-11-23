@@ -107,6 +107,77 @@ function big() {
   };
 }
 
+/** Süper ev: 2 kat, 12 × 9 m, açık mutfak + salon, yarım yükseklikte bar duvarı, renkli duvarlar */
+function villa() {
+  const paint = (f: any, id: string, patch: { int?: string; ext?: string; h?: number }) => {
+    const w = f.walls.find((x: any) => x.id === id);
+    if (w) Object.assign(w, patch);
+  };
+  const a = floor("Zemin kat", 2.9);
+  {
+    const { f, W, O, R, I, box } = a;
+    const [n, e, s, w] = box(12, 9);
+    const M = W([0, 5.5], [12, 5.5], 0.15);
+    const V1 = W([4, 5.5], [4, 9], 0.15);
+    const V2 = W([8, 5.5], [8, 9], 0.15);
+    const bar = W([6.5, 0], [6.5, 2.6], 0.2); // yarım yükseklikte bar duvarı
+    paint(f, bar, { h: 1.1 });
+    paint(f, n, { int: "#b7cdbd" }); paint(f, w, { int: "#f0dfb8", ext: "#d6c3a3" }); paint(f, e, { ext: "#d6c3a3" });
+    // açıklıklar
+    O(s, 7, 1.1, 2.2, 0, "door"); O(s, 10, 1.2, 1.4, 0.9, "window"); O(s, 2, 1.2, 1.4, 0.9, "window"); O(s, 5, 0.6, 0.6, 1.5, "window");
+    O(n, 2, 1.5, 1.4, 0.9, "window"); O(n, 5, 1.5, 1.4, 0.9, "window"); O(w, 6.5, 1.6, 1.5, 0.8, "window"); O(w, 2, 1.2, 1.4, 0.9, "window");
+    O(e, 1.2, 1, 1.2, 1, "window"); O(e, 3.5, 1.6, 2.2, 0, "door"); O(e, 7.5, 0.6, 0.6, 1.5, "window");
+    O(M, 6, 1.6, 2.2, 0, "door", "arch"); O(V1, 1.4, 0.9, 2.1, 0, "door"); O(V2, 1.4, 0.8, 2.1, 0, "door", "rect", true);
+    R("Salon ve mutfak", 3, 3, "#f3d9a6", "parquet"); R("Misafir odası", 2, 7, "#d9d2ef", "laminate"); R("Hol", 6, 8, "#eadfcf", "marble"); R("Banyo", 10, 7.5, "#cde6f2", "fayans");
+    // salon
+    I("sofa3", "Üçlü kanepe", "sofa", 3.2, 4.9, 180, 2.2, 0.95, 0.85, C.sit); I("coffee", "Orta sehpa", "rect", 3.2, 3.4, 0, 1, 0.6, 0.45, C.wood);
+    I("rug", "Halı (2 × 3 m)", "rug", 3.2, 3.4, 90, 2, 3, 0.02, "#c98f7a"); I("arm", "Koltuk", "sofa", 0.75, 2.8, 270, 0.9, 0.9, 0.85, C.sit); I("arm", "Koltuk", "sofa", 5.7, 3.0, 90, 0.9, 0.9, 0.85, C.sit);
+    I("tv", "TV ünitesi", "rect", 3.5, 0.3, 0, 1.8, 0.4, 0.5, "#6b5440"); I("stove", "Odun sobası", "stove", 0.6, 4.8, 0, 0.5, 0.5, 0.9, C.heat); I("plant", "Saksı bitkisi", "round", 0.5, 0.55, 0, 0.4, 0.4, 1.2, "#5d8a4a");
+    // mutfak
+    I("counter120", "Mutfak tezgâhı (120 cm)", "rect", 7.8, 0.45, 0, 1.2, 0.6, 0.9, C.kit); I("cooker", "Ocak / fırın", "cooker", 8.8, 0.45, 0, 0.6, 0.6, 0.9, C.kit);
+    I("sinkK", "Evye", "sink", 9.7, 0.45, 0, 1.2, 0.6, 0.9, C.kit); I("fridge", "Buzdolabı", "rect", 11.3, 0.5, 0, 0.7, 0.7, 1.8, "#eef0f2");
+    I("upper", "Mutfak üst dolabı", "rect", 7.8, 0.33, 0, 1.2, 0.35, 0.7, C.kit, 1.4); I("hood", "Aspiratör", "rect", 8.8, 0.4, 0, 0.6, 0.5, 0.2, "#b8bcc0", 1.65);
+    I("island", "Mutfak adası", "rect", 9.3, 2.2, 0, 1.8, 0.7, 0.9, "#c9c2b4");
+    for (const x of [8.7, 9.9]) I("chair", "Bar taburesi", "chair", x, 2.9, 0, 0.4, 0.4, 0.75, C.eat);
+    I("table4", "Yemek masası (4 kişilik)", "rect", 10, 4.5, 0, 1.4, 0.8, 0.75, C.eat);
+    for (const [x, y, r] of [[9.55, 3.9, 180], [10.45, 3.9, 180], [9.55, 5.1, 0], [10.45, 5.1, 0]]) I("chair", "Sandalye", "chair", x, y, r, 0.45, 0.45, 0.9, C.eat);
+    // misafir odası
+    I("bed2", "Çift kişilik yatak", "bed", 1.8, 7.9, 180, 1.6, 2, 0.5, "#d9c3a0"); I("night", "Komodin", "rect", 0.6, 8.7, 180, 0.45, 0.4, 0.5, "#9a7b5a"); I("night", "Komodin", "rect", 3.0, 8.7, 180, 0.45, 0.4, 0.5, "#9a7b5a");
+    I("ward2", "Gardırop (kapaklı küçük)", "wardrobe", 3.2, 5.85, 0, 1, 0.55, 2.1, "#b59472");
+    // hol
+    I("shoe", "Ayakkabılık", "rect", 4.35, 8.35, 270, 0.8, 0.35, 1, "#b9a58a");
+    // banyo
+    I("shower", "Duş teknesi", "shower", 11.45, 6.0, 0, 0.9, 0.9, 0.1, C.bath); I("vanity", "Lavabo dolabı", "sink", 10, 8.65, 180, 0.8, 0.45, 0.85, C.bath);
+    I("wc", "Klozet", "toilet", 11.5, 8.55, 180, 0.4, 0.7, 0.8, C.bath); I("washer", "Çamaşır makinesi", "rect", 8.7, 8.6, 180, 0.6, 0.6, 0.85, "#eef0f2");
+    f.stairs.push({ id: uid(), kind: "U", x: 7, y: 7.1, rot: 0, w: 0.8, mirror: false });
+  }
+  const b = floor("1. kat", 2.7);
+  {
+    const { f, W, O, R, I, box } = b;
+    const [n, e, s, w] = box(12, 9);
+    const M = W([0, 5.5], [12, 5.5], 0.15);
+    W([6.5, 0], [6.5, 5.5], 0.15);
+    const V1 = W([4, 5.5], [4, 9], 0.15); const V2 = W([8, 5.5], [8, 9], 0.15);
+    paint(f, n, { int: "#c4cfe3" }); paint(f, w, { int: "#e6cfd3", ext: "#d6c3a3" }); paint(f, e, { ext: "#d6c3a3" });
+    O(n, 5.5, 0.8, 1.4, 0.9, "window"); O(n, 9.5, 1.4, 1.4, 0.9, "window"); O(w, 6.5, 1.4, 1.4, 0.9, "window"); O(w, 2, 0.8, 0.6, 1.5, "window");
+    O(s, 2, 0.8, 0.6, 1.5, "window"); O(s, 6, 1.2, 1.4, 0.9, "window"); O(s, 10, 1.4, 1.3, 0.9, "window"); O(e, 2.5, 1.2, 1.4, 0.9, "window"); O(e, 7, 1.2, 1.3, 0.9, "window");
+    O(M, 5, 0.9, 2.1, 0, "door"); O(M, 7.4, 0.9, 2.1, 0, "door", "rect", true); O(V1, 1.4, 0.8, 2.1, 0, "door"); O(V2, 1.4, 0.9, 2.1, 0, "door");
+    R("Ana yatak odası", 3, 3, "#d9d2ef", "parquet"); R("Çocuk odası", 9, 3, "#f6d6c8", "laminate"); R("Banyo 2", 2, 7, "#cde6f2", "fayans"); R("Sahanlık", 6, 8, "#eadfcf", "parquet"); R("Çalışma odası", 10, 7.5, "#e3efd0", "laminate");
+    I("bed2", "Çift kişilik yatak", "bed", 3.2, 1.15, 0, 1.6, 2, 0.5, "#d9c3a0"); I("night", "Komodin", "rect", 2.0, 0.4, 0, 0.45, 0.4, 0.5, "#9a7b5a"); I("night", "Komodin", "rect", 4.4, 0.4, 0, 0.45, 0.4, 0.5, "#9a7b5a");
+    I("ward", "Gardırop", "wardrobe", 1.6, 5.1, 180, 1.8, 0.6, 2.2, "#b59472"); I("rug", "Halı (2 × 3 m)", "rug", 3.2, 2.9, 90, 2, 3, 0.02, "#a9b7c9"); I("plant", "Saksı bitkisi", "round", 6.0, 0.5, 0, 0.4, 0.4, 1.2, "#5d8a4a");
+    I("bed1", "Tek kişilik yatak", "bed", 7.4, 1.2, 0, 0.9, 2, 0.5, "#9fc3d9"); I("bed1", "Tek kişilik yatak", "bed", 9.3, 1.2, 0, 0.9, 2, 0.5, "#e7b7a4"); I("kdesk", "Çocuk çalışma masası", "rect", 11.2, 0.45, 0, 1, 0.55, 0.7, "#d8b48a");
+    I("ward", "Gardırop", "wardrobe", 9.2, 5.1, 180, 1.8, 0.6, 2.2, "#b59472");
+    I("tub", "Küvet", "tub", 0.5, 7.4, 0, 0.75, 1.7, 0.55, C.bath); I("vanity", "Lavabo dolabı", "sink", 2.5, 8.65, 180, 0.8, 0.45, 0.85, C.bath); I("wc", "Klozet", "toilet", 3.4, 8.55, 180, 0.4, 0.7, 0.8, C.bath);
+    I("kdesk", "Çalışma masası", "rect", 10, 8.55, 180, 1.6, 0.7, 0.75, C.wood); I("chair", "Ofis sandalyesi", "chair", 10, 7.9, 180, 0.5, 0.5, 0.9, "#4d5560");
+    I("shelf", "Kitaplık", "rect", 10, 5.8, 0, 1.6, 0.3, 2, C.wood);
+  }
+  return {
+    plot: plot(-5, -6, 17, 14), snap: 0.1, defT: 0.25, roof: { kind: "hip", pitch: 28, overhang: 0.6, ridge: "auto", color: "#7a3f2e", tex: "tile" },
+    floors: [a.f, b.f], custom: [], fin: { ...fin, extColor: "#efe4d0", intColor: "#f6f2ea" },
+    env: env([tree(-3, -3.5, 1.1), tree(14.5, 11), pine(15, -3.5), pine(-3.5, 11.5, 0.9), { kind: "bush", name: "Çalı", x: 1, y: 10.2, w: 1.2, d: 1.2, h: 0.9, color: "#5d8a4a" }, { kind: "bush", name: "Çalı", x: 11, y: 10.2, w: 1.2, d: 1.2, h: 0.9, color: "#5d8a4a" }, { kind: "road", name: "Yol", x: 6, y: 15, w: 30, d: 5, h: 0.05, color: "#5e5e5e" }, { kind: "fence", name: "Çit", x: 6, y: 12.5, w: 20, d: 0.08, h: 1, color: "#8a6a4a" }]),
+  };
+}
+
 /** Bağ evi: tek oda + küçük banyo, 6 × 5 m, sobalı */
 function cabin() {
   const { f, W, O, R, I, box } = floor("Zemin kat", 2.6);
@@ -130,5 +201,6 @@ export const TEMPLATES: { key: string; name: string; desc: string; make: () => u
   { key: "empty", name: "Boş arsa", desc: "Sıfırdan kendin çiz", make: () => null },
   { key: "small", name: "Küçük köy evi", desc: "Tek kat · 2+1 · 9\u00a0×\u00a07\u00a0m", make: small },
   { key: "big", name: "İki katlı köy evi", desc: "2 kat · 4+1 · 10\u00a0×\u00a08\u00a0m", make: big },
+  { key: "villa", name: "Süper iki katlı ev", desc: "2 kat · 4+1 · açık mutfak · 12\u00a0×\u00a09\u00a0m", make: villa },
   { key: "cabin", name: "Bağ evi", desc: "Tek oda + banyo · 6\u00a0×\u00a05\u00a0m", make: cabin },
 ];

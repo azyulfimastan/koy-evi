@@ -68,7 +68,7 @@ export function computeReport(f: FullData): Report {
       const outB = isOut(mx - nx * off, my - ny * off);
       const ops = fl.openings.filter((o) => o.wall === w.id);
       const opArea = ops.reduce((s, o) => s + o.w * o.h, 0);
-      const gross = L * fl.height;
+      const gross = L * (w.h ?? fl.height);
       wallLen += L;
       wallVol += (gross - opArea) * w.t;
       const faces = [outA, outB];

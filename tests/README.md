@@ -29,6 +29,7 @@ Sonra `tests/e2e` klasöründen (görüntüler `tests/shots/` içine düşer):
 | `yedek_test.py` | şablon, yedek indir/yükle, sürüm geçmişi, çöp kutusu |
 | `akicilik_test.py` | telefon hızında kare süreleri (2D önizleme, kaydırma, 3D döndürme) |
 | `cizim_test.py` | duvar çizerken 90° kilidi, rakamla ölçü, çift tıkla ölçü, 90° yap |
+| `villa_gorsel.py`, `ogretici_gorsel.py` | süper ev şablonu ve öğretici için ekran görüntüleri |
 | `performans_test.py` | 3 katlı büyük evde 3D kurulum süresi |
 | `foto_test.py` | gerçekçi fotoğraf modu (küçük boyutta) |
 | `gorsel.py`, `liste_gorsel.py` | örnek evin ekran görüntüleri |
