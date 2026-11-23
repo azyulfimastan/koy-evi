@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type { Balcony, CatItem, FullData, Item, Opening, PlanData, Pt, Room, Stair, Wall } from "@/lib/types";
 import { flatten, newFloor, normalizeFull, uid, unflatten, defaultFull, defaultBuild } from "@/lib/types";
 import { roofInfo, ATTIC_MIN } from "@/lib/roof";
@@ -68,6 +68,8 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
   const [playing, setPlaying] = useState(false);
   const [walkRoom, setWalkRoom] = useState("center");
   const [is3d, setIs3d] = useState(false);
+  const [live3, setLive3] = useState(false);
+  const live3First = useRef(true);
   const [showRep, setShowRep] = useState(false);
   const [showBak, setShowBak] = useState(false);
   const [guideOpen, setGuideOpen] = useState(false);
@@ -89,6 +91,10 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
   const [secFlip, setSecFlip] = useState(false);
   const [cmd3, setCmd3] = useState<View3DCmd | undefined>(undefined);
   const inWalk = !!walk;
+  const dfull = useDeferredValue(full);
+  useEffect(() => { if (live3First.current) { live3First.current = false; return; } const t = window.setTimeout(() => fit(), 120); return () => window.clearTimeout(t); }, [live3]);
+  const liveV3 = useMemo<V3>(() => ({ floors: "all", roof: full.roof.kind !== "none", items: true, sec: "none" }), [full.roof.kind]);
+  const noop = useCallback(() => {}, []);
   const v3eff = useMemo<V3>(() => (inWalk ? { ...v3, sec: "none", floors: "all" } : v3), [v3, inWalk]);
   const [cat, setCat] = useState(CATS[0]);
   const [cust, setCust] = useState({ name: "", w: "100", d: "60", h: "75", color: "#d9d3b8" });
@@ -1475,6 +1481,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
         <button className={"v3btn" + (is3d ? " on" : "")} onClick={() => { setIs3d((v) => !v); setSel(null); setChain(null); setWalk(null); setPick3(null); setPlaying(false); }}>
           {is3d ? <>◧ <span className="lg">2D plana dön</span><span className="sm">2D</span></> : <>🧊 <span className="lg">3D görünüm</span><span className="sm">3D</span></>}
         </button>
+        {!is3d && <button className={"v3btn live" + (live3 ? " on" : "")} onClick={() => setLive3((v) => !v)} aria-pressed={live3} title="Çizerken yanda canlı 3D göster"><span>◫ <span className="lg">Yan 3D</span><span className="sm">Yan</span></span></button>}
         <button className="v3btn rep" onClick={() => setShowRep(true)}>📋 Rapor</button>
         <span className="helpwrap">
           <button className="v3btn gd tourbtn" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setHelpPos({ top: r.bottom + 6, right: Math.max(8, window.innerWidth - r.right) }); setHelpMenu((v) => !v); }} aria-expanded={helpMenu} title="Yardım: demo ve adım adım izle">🎬</button>
@@ -1555,6 +1562,12 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
       {showRep && <Report full={full} name={name} onClose={() => setShowRep(false)} onPrices={(pr) => setFull((f) => ({ ...f, prices: pr }))} />}
       <div className="stage">
         {is3d && <View3D full={full} fi={fi} v3={v3eff} name={name} walk={walk} pan={pan3} sel={pick3} onPick={setPick3} onExit={() => setWalk(null)} onWallH={onWallH} secPos={secPos} secFlip={secFlip} cmd={cmd3} />}
+        {!is3d && live3 && (
+          <div className="live3" aria-label="Canlı 3D önizleme">
+            <View3D full={dfull} fi={fi} v3={liveV3} name={name} walk={null} pan={false} sel={null} onPick={noop} onExit={noop} />
+            <span className="live3tag">Canlı 3D</span>
+          </div>
+        )}
         <div className="cv" ref={wrap} style={is3d ? { display: "none" } : undefined}>
           <canvas
             ref={cv}
