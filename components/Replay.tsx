@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import type { FullData } from "@/lib/types";
 import { flatten } from "@/lib/types";
 import { buildReplay, cutAt } from "@/lib/replay";
@@ -8,6 +9,11 @@ import { drawPlan } from "./editor/drawPlan";
 import { endJoins, rasterize, regionAt } from "@/lib/rooms";
 import type { Region } from "@/lib/rooms";
 import type { Pt } from "@/lib/types";
+import type { V3 } from "@/lib/scene3d";
+
+const View3D = dynamic(() => import("./View3D"), { ssr: false, loading: () => <div className="v3 v3load">3D hazırlanıyor…</div> });
+const noop = () => {};
+type Mode = "2d" | "3d" | "both";
 
 /** Bir evin yapılışını ileri / geri tuşlarıyla adım adım gösterir (salt okunur, hiçbir şeyi değiştirmez) */
 export default function Replay({ full, name, onClose, startAt = 0 }: { full: FullData; name: string; onClose: () => void; startAt?: number }) {
@@ -17,11 +23,14 @@ export default function Replay({ full, name, onClose, startAt = 0 }: { full: Ful
   const wrap = useRef<HTMLDivElement>(null);
   const cv = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState(0);
+  const [mode, setMode] = useState<Mode>(() => { try { const m = localStorage.getItem("kte_rpmode"); return m === "3d" || m === "both" ? m : "2d"; } catch { return "2d"; } });
+  const pickMode = (m: Mode) => { setMode(m); try { localStorage.setItem("kte_rpmode", m); } catch { /* yoksay */ } };
   const s = steps[k];
   const last = steps.length - 1;
 
   const part = useMemo(() => cutAt(full, s), [full, s]);
   const data = useMemo(() => flatten(part, s.floor), [part, s.floor]);
+  const v3 = useMemo<V3>(() => ({ floors: "all", roof: part.roof.kind !== "none", items: true, sec: "none" }), [part.roof.kind]);
   const joins = useMemo(() => endJoins(data.walls), [data.walls]);
   const raster = useMemo(() => rasterize(data.walls), [data.walls]);
   const regions = useMemo(() => {
@@ -110,8 +119,20 @@ export default function Replay({ full, name, onClose, startAt = 0 }: { full: Ful
         <span className="rpfl">{full.floors[s.floor]?.name}</span>
         <button onClick={onClose}>✕ Kapat</button>
       </div>
-      <div className="rpcv" ref={wrap}>
-        <canvas ref={cv} />
+      <div className="rpmode" role="tablist" aria-label="Görünüm">
+        {([["2d", "2D"], ["3d", "3D"], ["both", "Yan yana"]] as [Mode, string][]).map(([m, l]) => (
+          <button key={m} role="tab" aria-selected={mode === m} className={mode === m ? "on" : ""} onClick={() => pickMode(m)}>{l}</button>
+        ))}
+      </div>
+      <div className={"rpbody m" + mode}>
+        <div className="rpcv" ref={wrap} style={mode === "3d" ? { display: "none" } : undefined}>
+          <canvas ref={cv} />
+        </div>
+        {mode !== "2d" && (
+          <div className="rp3d">
+            <View3D full={part} fi={s.floor} v3={v3} name={name} walk={null} pan={false} sel={null} onPick={noop} onExit={noop} />
+          </div>
+        )}
       </div>
       <div className="rpcard">
         <div className="rpmeta"><span>{s.phase}</span><span>{k + 1} / {steps.length}</span></div>

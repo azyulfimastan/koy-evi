@@ -43,6 +43,11 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
   const hoverRef = useRef<Pt | null>(null);
   const snapRef = useRef<SnapInfo>(null);
   const lastTap = useRef<{ id: string; t: number } | null>(null);
+  type Corner = { pt: Pt; src: "plot" | "wall" };
+  const [marq, setMarq] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
+  const [corners, setCorners] = useState<Corner[]>([]);
+  const [cornerSel, setCornerSel] = useState<number>(-1);
+  const [cornerEdit, setCornerEdit] = useState<null | { c: Corner; first?: Pt; ang: string; l1: string; l2: string; hasAng: boolean; hasL2: boolean }>(null);
   const [lenEdit, setLenEdit] = useState<{ kind: "wall" | "draw"; id?: string; x: number; y: number; v: string } | null>(null);
   const drawRef = useRef<() => void>(() => {});
   const rafDraw = useRef(0);
@@ -408,6 +413,103 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
     const m = toScreen({ x: (w.a.x + w.b.x) / 2, y: (w.a.y + w.b.y) / 2 });
     setLenEdit({ kind: "wall", id, x: m.x, y: m.y, v: dist(w.a, w.b).toFixed(2).replace(".", ",") });
   }
+  /** köşeye bağlı komşu uçlar (en çok iki) */
+  function cornerNeighbors(c: Corner, first?: Pt): Pt[] {
+    const out0 = cornerNeighborsRaw(c);
+    if (first && out0.length === 2 && near(out0[1], first, 1e-6)) return [out0[1], out0[0]];
+    return out0;
+  }
+  function cornerNeighborsRaw(c: Corner): Pt[] {
+    const d = dataRef.current;
+    if (c.src === "plot") {
+      const pts = d.plot.points;
+      const i = pts.findIndex((q) => near(q, c.pt, 1e-6));
+      if (i < 0) return [];
+      const n = pts.length;
+      const out: Pt[] = [];
+      if (d.plot.closed || i > 0) out.push(pts[(i - 1 + n) % n]);
+      if (d.plot.closed || i < n - 1) out.push(pts[(i + 1) % n]);
+      return out;
+    }
+    const out: Pt[] = [];
+    for (const w of d.walls) {
+      if (near(w.a, c.pt, 1e-6) && !out.some((q) => near(q, w.b, 1e-6))) out.push({ ...w.b });
+      else if (near(w.b, c.pt, 1e-6) && !out.some((q) => near(q, w.a, 1e-6))) out.push({ ...w.a });
+    }
+    return out.slice(0, 2);
+  }
+  function openCorner(i: number) {
+    const c = corners[i];
+    if (!c) return;
+    setCornerSel(i);
+    openCornerAt(c);
+  }
+  /** bir kenara çift tıklanınca: tıklanan uca yakın köşe, 1. kenar = tıklanan kenar */
+  function openEdgeAt(src: "plot" | "wall", a: Pt, b: Pt, click: Pt) {
+    const useA = dist(a, click) <= dist(b, click);
+    const c: Corner = { pt: { ...(useA ? a : b) }, src };
+    const far = useA ? b : a;
+    setCorners([c]);
+    setCornerSel(0);
+    openCornerAt(c, { ...far });
+  }
+  function openCornerAt(c: Corner, first?: Pt) {
+    const nb = cornerNeighbors(c, first);
+    if (!nb.length) return;
+    const fmtN = (v: number) => v.toFixed(2).replace(".", ",");
+    let ang = "";
+    if (nb.length >= 2) {
+      const a1 = Math.atan2(nb[0].y - c.pt.y, nb[0].x - c.pt.x);
+      const a2 = Math.atan2(nb[1].y - c.pt.y, nb[1].x - c.pt.x);
+      let da = Math.abs(a1 - a2) * (180 / Math.PI);
+      if (da > 180) da = 360 - da;
+      ang = da.toFixed(1).replace(".", ",");
+    }
+    setCornerEdit({ c, first, ang, l1: fmtN(dist(c.pt, nb[0])), l2: nb[1] ? fmtN(dist(c.pt, nb[1])) : "", hasAng: nb.length >= 2, hasL2: nb.length >= 2 });
+  }
+  function applyCorner(ang90 = false) {
+    const ce = cornerEdit;
+    if (!ce) return;
+    const nb = cornerNeighbors(ce.c, ce.first);
+    if (!nb.length) { setCornerEdit(null); return; }
+    const P = ce.c.pt;
+    const num = (t: string) => parseFloat(t.replace(",", "."));
+    const L1 = num(ce.l1);
+    const L2 = ce.hasL2 ? num(ce.l2) : NaN;
+    const T = ang90 ? 90 : ce.hasAng ? num(ce.ang) : NaN;
+    if (!(L1 >= 0.1 && L1 <= 500) || (ce.hasL2 && !(L2 >= 0.1 && L2 <= 500))) { setNote("Ölçü 0,1 ile 500 m arasında olmalı."); return; }
+    if (ce.hasAng && !(T > 0 && T < 180)) { setNote("Açı 0 ile 180 derece arasında olmalı."); return; }
+    const A = nb[0];
+    const B = nb[1];
+    const ua = { x: (A.x - P.x) / (dist(A, P) || 1), y: (A.y - P.y) / (dist(A, P) || 1) };
+    const A2: Pt = { x: round3(P.x + ua.x * L1), y: round3(P.y + ua.y * L1) };
+    let B2: Pt | null = null;
+    if (B) {
+      const ub = { x: (B.x - P.x) / (dist(B, P) || 1), y: (B.y - P.y) / (dist(B, P) || 1) };
+      const cr = ua.x * ub.y - ua.y * ub.x;
+      const sgn = cr < 0 ? -1 : 1;
+      const th = (T * Math.PI) / 180 * sgn;
+      const nx = ua.x * Math.cos(th) - ua.y * Math.sin(th);
+      const ny = ua.x * Math.sin(th) + ua.y * Math.cos(th);
+      B2 = { x: round3(P.x + nx * L2), y: round3(P.y + ny * L2) };
+    }
+    const d = dataRef.current;
+    if (ce.c.src === "plot") {
+      const pts = d.plot.points.map((q) => ({ ...q }));
+      pts.forEach((q, k) => {
+        if (near(q, A, 1e-6)) pts[k] = { ...A2 };
+        else if (B && B2 && near(q, B, 1e-6)) pts[k] = { ...B2 };
+      });
+      apply({ ...d, plot: { ...d.plot, points: pts } });
+    } else {
+      let walls = moveEndpoints(d, A, A2);
+      if (B && B2) walls = moveEndpoints({ ...d, walls }, B, B2);
+      apply({ ...d, walls });
+    }
+    setCornerEdit(null);
+    setCorners([]);
+    setCornerSel(-1);
+  }
   function openLenDraw(first = "") {
     const ch = chainRef.current;
     const hv = hoverRef.current;
@@ -554,6 +656,50 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
     return p;
   }
 
+  /** Kırp: dokunulan duvar parçasını en yakın duvar kesişimine kadar sil */
+  function trimAt(wp: Pt) {
+    const d = dataRef.current;
+    const wl = hitWall(wp, 12);
+    if (!wl) { setNote("Kırpmak istediğin duvar parçasına dokun."); return; }
+    const L = dist(wl.a, wl.b);
+    if (L < 0.05) return;
+    const ux = (wl.b.x - wl.a.x) / L, uy = (wl.b.y - wl.a.y) / L;
+    const tc = segProject(wp, wl.a, wl.b).t * L;
+    const ts: number[] = [];
+    for (const o of d.walls) {
+      if (o.id === wl.id) continue;
+      const rx = o.b.x - o.a.x, ry = o.b.y - o.a.y;
+      const den = ux * ry - uy * rx;
+      if (Math.abs(den) < 1e-9) continue;
+      const qx = o.a.x - wl.a.x, qy = o.a.y - wl.a.y;
+      const t1 = (qx * ry - qy * rx) / den; // wl üzerinde (m)
+      const t2 = (qx * uy - qy * ux) / den; // o üzerinde (0..1)
+      const eps = 0.03 / (dist(o.a, o.b) || 1);
+      if (t2 < -eps || t2 > 1 + eps) continue;
+      if (t1 < 0.03 || t1 > L - 0.03) continue;
+      ts.push(t1);
+    }
+    const lower = ts.filter((t) => t < tc - 0.02).sort((a, b) => b - a)[0];
+    const upper = ts.filter((t) => t > tc + 0.02).sort((a, b) => a - b)[0];
+    if (lower === undefined && upper === undefined) { setNote("Bu duvar başka bir duvarla kesişmiyor, kırpılacak yer yok."); return; }
+    const P = (t: number): Pt => ({ x: round3(wl.a.x + ux * t), y: round3(wl.a.y + uy * t) });
+    let walls = d.walls.filter((x) => x.id !== wl.id);
+    let ops = d.openings.filter((o) => o.wall !== wl.id);
+    const mine = d.openings.filter((o) => o.wall === wl.id);
+    const keepA = lower !== undefined; // a tarafı kalır
+    const keepB = upper !== undefined; // b tarafı kalır
+    if (keepA) {
+      walls.push({ ...wl, a: wl.a, b: P(lower!) });
+      ops.push(...mine.filter((o) => o.pos + o.w / 2 <= lower! + 0.01));
+    }
+    if (keepB) {
+      const nid = keepA ? uid() : wl.id;
+      walls.push({ ...wl, id: nid, a: P(upper!), b: wl.b });
+      ops.push(...mine.filter((o) => o.pos - o.w / 2 >= upper! - 0.01).map((o) => ({ ...o, wall: nid, pos: round3(o.pos - upper!) })));
+    }
+    apply({ ...d, walls, openings: ops });
+    setSel(null);
+  }
   function hitWall(p: Pt, tolPx = 8): Wall | null {
     const d = dataRef.current;
     let best: Wall | null = null;
@@ -629,6 +775,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
     | { kind: "imove"; id: string; start: Pt; x0: number; y0: number; before: FullData; moved: boolean }
     | { kind: "bmove"; id: string; start: Pt; pos0: number; before: FullData; moved: boolean }
     | { kind: "smove"; id: string; start: Pt; x0: number; y0: number; before: FullData; moved: boolean }
+    | { kind: "marq"; sx: number; sy: number; moved: boolean; click?: () => void }
     | { kind: "pinch"; d: number; s: number; cx: number; cy: number };
   const drag = useRef<Drag>(null);
 
@@ -680,6 +827,8 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
     const w = toWorld(p.x, p.y);
     const t = toolRef.current;
     const pan = (click?: () => void): Drag => ({ kind: "pan", sx: p.x, sy: p.y, ox: viewRef.current.ox, oy: viewRef.current.oy, moved: false, click });
+    if (e.button === 1) { e.preventDefault(); drag.current = pan(); return; }
+    if (cornerEdit) setCornerEdit(null); // orta tuş: sadece gezin, kenar/köşe tutma
 
     if (t === "plot") {
       if (d.plot.closed) {
@@ -720,6 +869,11 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
         if (last && dist(last, ww) < 1e-6) return;
         apply({ ...cur, plot: { ...cur.plot, points: [...cur.plot.points.map((q) => ({ ...q })), ww] } });
       });
+      return;
+    }
+
+    if (t === "trim") {
+      drag.current = pan(() => trimAt(toWorld(p.x, p.y)));
       return;
     }
 
@@ -974,7 +1128,21 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
         }
       }
     }
-    drag.current = pan(() => setSel(hitRoom ? { k: "room", id: hitRoom.id } : null));
+    // arsa kenarına çift tıkla: açı / ölçü kutusu
+    const pe = hitPlotEdge(w);
+    const emptyClick = () => { setCorners([]); setCornerSel(-1); setSel(hitRoom ? { k: "room", id: hitRoom.id } : null); };
+    const edgeClick = () => {
+      const now = performance.now();
+      const lt = lastTap.current;
+      if (lt && lt.id === "pe" + pe && now - lt.t < 450) {
+        lastTap.current = null;
+        const a = d.plot.points[pe], b = d.plot.points[(pe + 1) % d.plot.points.length];
+        openEdgeAt("plot", a, b, w);
+      } else { lastTap.current = { id: "pe" + pe, t: now }; emptyClick(); }
+    };
+    const clk = pe >= 0 ? edgeClick : emptyClick;
+    if (e.pointerType === "mouse" && e.button === 0 && !e.shiftKey) drag.current = { kind: "marq", sx: p.x, sy: p.y, moved: false, click: clk };
+    else drag.current = pan(clk);
   }
 
   function onMove(e: React.PointerEvent) {
@@ -1014,6 +1182,9 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
       if (Math.hypot(dx, dy) > 6) d.moved = true;
       if (d.moved) setView({ ...viewRef.current, ox: d.ox + dx, oy: d.oy + dy });
       else updateHover();
+    } else if (d.kind === "marq") {
+      if (Math.hypot(p.x - d.sx, p.y - d.sy) > 6) d.moved = true;
+      if (d.moved) setMarq({ x0: d.sx, y0: d.sy, x1: p.x, y1: p.y });
     } else if (d.kind === "pv") {
       const cur = dataRef.current;
       const pts = cur.plot.points.map((q) => ({ ...q }));
@@ -1106,18 +1277,38 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
   }
 
   // ---------- çift / üç tıkla tam ekran ----------
-  function fsZone(t: EventTarget | null): "plan" | "live" | "main3d" | null {
+  function hitPlotEdge(w: Pt): number {
+    const d = dataRef.current;
+    const pts0 = d.plot.points;
+    if (pts0.length < 2) return -1;
+    const tol = 9 / viewRef.current.s;
+    for (let i = 0; i < pts0.length; i++) {
+      if (i === pts0.length - 1 && !d.plot.closed) break;
+      const sp = segProject(w, pts0[i], pts0[(i + 1) % pts0.length]);
+      if (sp.d <= tol) return i;
+    }
+    return -1;
+  }
+  function fsZone(t: EventTarget | null, ev?: { clientX: number; clientY: number }): "plan" | "live" | "main3d" | null {
     const el = t as HTMLElement | null;
     if (!el || !el.closest) return null;
-    if (el.closest("button,input,select,textarea,aside,.pad,.lenbox,.floatbtn,.h3handle,.v3bar,.fsback")) return null;
+    if (el.closest("button,input,select,textarea,aside,.pad,.lenbox,.floatbtn,.h3handle,.v3bar,.fsback,.cmark,.cbox,.cedit")) return null;
     if (el.closest(".live3")) return "live";
-    if (el.closest(".cv")) return "plan";
+    if (el.closest(".cv")) {
+      if (ev && cv.current) {
+        // duvar / arsa kenarı / köşe işareti üstünde çift tık = açı-ölçü kutusu, tam ekran değil
+        const q = local(ev);
+        const wpt = toWorld(q.x, q.y);
+        if (hitWall(wpt, 10) || hitPlotEdge(wpt) >= 0) return null;
+      }
+      return "plan";
+    }
     if (el.closest(".v3")) return "main3d";
     return null;
   }
   function stageDownCap(e: React.PointerEvent) {
     if (!e.isPrimary) return;
-    const z = fsZone(e.target);
+    const z = fsZone(e.target, e);
     const m = mt.current;
     const now = e.nativeEvent.timeStamp; // olayın gerçek zamanı (ağır 3B çizim yavaşlatsa da doğru)
     if (!z) {
@@ -1167,12 +1358,28 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
       if (!d.moved) d.click?.();
       return;
     }
+    if (d.kind === "marq") {
+      setMarq(null);
+      if (!d.moved) { d.click?.(); return; }
+      const q = local(e);
+      const x0 = Math.min(d.sx, q.x), x1 = Math.max(d.sx, q.x), y0 = Math.min(d.sy, q.y), y1 = Math.max(d.sy, q.y);
+      const cur = dataRef.current;
+      const found: Corner[] = [];
+      const inside = (pt: Pt) => { const sp = toScreen(pt); return sp.x >= x0 && sp.x <= x1 && sp.y >= y0 && sp.y <= y1; };
+      cur.walls.forEach((w) => [w.a, w.b].forEach((pt) => { if (inside(pt) && !found.some((c) => near(c.pt, pt, 1e-6))) found.push({ pt: { ...pt }, src: "wall" }); }));
+      cur.plot.points.forEach((pt) => { if (inside(pt) && !found.some((c) => near(c.pt, pt, 1e-6))) found.push({ pt: { ...pt }, src: "plot" }); });
+      setCorners(found);
+      setCornerSel(found.length === 1 ? 0 : -1);
+      setSel(null);
+      setNote(found.length ? (found.length === 1 ? "Köşe seçildi. Açı ve ölçü için köşeye çift tıkla." : found.length + " köşe bulundu. Birini seç, çift tıkla.") : "Pencerede köşe yok.");
+      return;
+    }
     if (d.kind === "wmove" && !d.moved) {
       const now = performance.now();
       const lt = lastTap.current;
       if (lt && lt.id === d.id && now - lt.t < 450) {
         lastTap.current = null;
-        openLenWall(d.id);
+        { const w0 = dataRef.current.walls.find((x) => x.id === d.id); if (w0) openEdgeAt("wall", w0.a, w0.b, toWorld(local(e).x, local(e).y)); }
       } else lastTap.current = { id: d.id, t: now };
       return;
     }
@@ -1352,6 +1559,13 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
     nf.floors = nf.floors.map((fl, i) => (i === floor ? { ...fl, walls: fl.walls.map((q) => (q.id === id ? { ...q, h } : q)) } : fl));
     setFull(nf);
   };
+  const onItemMove = (floor: number, id: string, x: number, y: number, phase: "start" | "move" | "end") => {
+    if (phase === "start") { commit(fullRef.current); return; }
+    if (phase === "end") return;
+    const g = fullRef.current.snap;
+    const sx = g > 0 ? Math.round(x / g) * g : x, sy = g > 0 ? Math.round(y / g) * g : y;
+    setFull((f) => ({ ...f, floors: f.floors.map((fl, i) => (i === floor ? { ...fl, items: fl.items.map((q) => (q.id === id ? { ...q, x: sx, y: sy } : q)) } : fl)) }));
+  };
   const edit3d = (fn: (f: FullData) => FullData) => {
     const f = fullRef.current;
     commit(f);
@@ -1432,7 +1646,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
         chainFirst.current = null;
         if (envPickRef.current) setEnvPick(null);
         else if (pickRef.current) setPick(null);
-        else if (toolRef.current !== "plot") setTool("select");
+        else setTool("select");
       }
     };
     window.addEventListener("keydown", onKey);
@@ -1510,6 +1724,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
     ["select", "Seç"],
     ["plot", "Arsa"],
     ["wall", "Duvar"],
+    ["trim", "✂ Kırp"],
     ["door", "Kapı"],
     ["window", "Pencere"],
     ["room", "Oda"],
@@ -1539,10 +1754,12 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
           </button>
         ))}
         {!is3d && <button className="add" onClick={addFloor}>+ Kat</button>}
-        <button className={"v3btn" + (is3d ? " on" : "")} onClick={() => { setIs3d((v) => !v); setSel(null); setChain(null); setWalk(null); setPick3(null); setPlaying(false); }}>
-          {is3d ? <>◧ <span className="lg">2D plana dön</span><span className="sm">2D</span></> : <>🧊 <span className="lg">3D görünüm</span><span className="sm">3D</span></>}
-        </button>
-        {!is3d && <button className={"v3btn live" + (live3 ? " on" : "")} onClick={() => setLive3((v) => !v)} aria-pressed={live3} title="Çizerken yanda canlı 3D göster"><span>◫ <span className="lg">Yan 3D</span><span className="sm">Yan</span></span></button>}
+        {is3d && (
+          <button className="v3btn on" onClick={() => { setIs3d(false); setSel(null); setChain(null); setWalk(null); setPick3(null); setPlaying(false); }}>
+            ◧ <span className="lg">2D plana dön</span><span className="sm">2D</span>
+          </button>
+        )}
+        {!is3d && <button className={"v3btn live" + (live3 ? " on" : "")} style={{ marginLeft: "auto" }} onClick={() => setLive3((v) => !v)} aria-pressed={live3} title="Çizerken yanda canlı 3D göster"><span>◫ <span className="lg">Yan 3D</span><span className="sm">Yan</span></span></button>}
         <button className="v3btn rep" onClick={() => setShowRep(true)}>📋 Rapor</button>
         <span className="helpwrap">
           <button className="v3btn gd tourbtn" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setHelpPos({ top: r.bottom + 6, right: Math.max(8, window.innerWidth - r.right) }); setHelpMenu((v) => !v); }} aria-expanded={helpMenu} title="Yardım: demo ve adım adım izle">🎬</button>
@@ -1624,12 +1841,12 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
       <div className={"stage" + (fs ? " fs fs-" + fs : "")} onPointerDownCapture={stageDownCap} onPointerMoveCapture={stageMoveCap} onPointerUpCapture={stageUpCap}>
         {is3d && !fs && <button className="fsbtn m3" onClick={() => setFs("main3d")} aria-label="3D görünümü tam ekran yap">⤢ Büyüt</button>}
         {fs && <button className="fsback" onClick={() => setFs(null)} aria-label="Tam ekrandan çık">⤡ Geri dön</button>}
-        {is3d && <View3D full={full} fi={fi} v3={v3eff} name={name} walk={walk} pan={pan3} sel={pick3} onPick={setPick3} onExit={() => setWalk(null)} onWallH={onWallH} secPos={secPos} secFlip={secFlip} cmd={cmd3} />}
+        {is3d && <View3D full={full} fi={fi} v3={v3eff} name={name} walk={walk} pan={pan3} sel={pick3} onPick={setPick3} onExit={() => setWalk(null)} onWallH={onWallH} onItemMove={onItemMove} secPos={secPos} secFlip={secFlip} cmd={cmd3} />}
         {!is3d && live3 && (
           <div className="live3" aria-label="Canlı 3D önizleme">
-            <View3D full={dfull} fi={fi} v3={liveV3} name={name} walk={null} pan={false} sel={null} onPick={noop} onExit={noop} />
+            <View3D full={dfull} fi={fi} v3={liveV3} name={name} walk={null} pan={false} sel={null} onPick={noop} onExit={noop} onItemMove={onItemMove} />
             <span className="live3tag">Canlı 3D</span>
-            {!fs && <button className="fsbtn br" onClick={() => setFs("live")} aria-label="3D'yi tam ekran yap">⤢ Büyüt</button>}
+            {!fs && <button className="fsbtn br" onClick={() => { setIs3d(true); setSel(null); setChain(null); }} aria-label="3D'yi tam ekran aç (araçlarıyla)">⤢ Büyüt</button>}
           </div>
         )}
         <div className="cv" ref={wrap} style={is3d ? { display: "none" } : undefined}>
@@ -1647,6 +1864,32 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
             }}
           />
           <div className="hint">{note || hint()}</div>
+          {marq && <div className="marq" style={{ left: Math.min(marq.x0, marq.x1), top: Math.min(marq.y0, marq.y1), width: Math.abs(marq.x1 - marq.x0), height: Math.abs(marq.y1 - marq.y0) }} />}
+          {corners.map((c, i) => {
+            const sp = toScreen(c.pt);
+            return <button key={i} className={"cmark" + (cornerSel === i ? " on" : "")} style={{ left: sp.x, top: sp.y }} aria-label="Köşe" onPointerDown={(e) => e.stopPropagation()} onClick={() => setCornerSel(i)} onDoubleClick={() => openCorner(i)} />;
+          })}
+          {cornerSel >= 0 && !cornerEdit && corners[cornerSel] && (() => { const sp = toScreen(corners[cornerSel].pt); return <button className="cedit" style={{ left: Math.min(sp.x + 14, (wrap.current?.clientWidth ?? 300) - 150), top: sp.y + 14 }} onPointerDown={(e) => e.stopPropagation()} onClick={() => openCorner(cornerSel)}>📐 Açı / ölçü</button>; })()}
+          {cornerEdit && (() => {
+            const sp = toScreen(cornerEdit.c.pt);
+            const W = wrap.current?.clientWidth ?? 320;
+            const field = (lbl: string, k: "ang" | "l1" | "l2", unit: string) => (
+              <label className="cf"><span>{lbl}</span><input autoFocus={k === "l1"} inputMode="decimal" value={cornerEdit[k]} onChange={(e) => setCornerEdit({ ...cornerEdit, [k]: e.target.value })} onFocus={(e) => e.currentTarget.select()} onKeyDown={(e) => { if (e.key === "Enter") applyCorner(); else if (e.key === "Escape") setCornerEdit(null); e.stopPropagation(); }} /><em>{unit}</em></label>
+            );
+            return (
+              <div className="cbox" style={{ left: Math.max(8, Math.min(sp.x + 16, W - 236)), top: Math.max(8, sp.y - 20) }} onPointerDown={(e) => e.stopPropagation()}>
+                <b>{cornerEdit.c.src === "plot" ? "Arsa köşesi" : "Duvar köşesi"}</b>
+                {cornerEdit.hasAng && field("Açı", "ang", "°")}
+                {field("1. kenar", "l1", "m")}
+                {cornerEdit.hasL2 && field("2. kenar", "l2", "m")}
+                <div className="crow">
+                  <button className="primary" onClick={() => applyCorner()}>Uygula</button>
+                  {cornerEdit.hasAng && <button onClick={() => applyCorner(true)}>90° yap</button>}
+                  <button onClick={() => setCornerEdit(null)}>İptal</button>
+                </div>
+              </div>
+            );
+          })()}
           {lenEdit && (
             <div className="lenbox" style={{ left: Math.max(8, lenEdit.x - 60), top: Math.max(8, lenEdit.y - 52) }}>
               <input

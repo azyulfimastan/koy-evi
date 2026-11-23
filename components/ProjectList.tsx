@@ -121,6 +121,14 @@ export default function ProjectList({ onOpen, onLogout }: { onOpen: (id: string)
     loadTrash();
   }
 
+  async function purgeAll() {
+    if (!trash?.length) return;
+    if (!window.confirm(`Çöp kutusundaki ${trash.length} ev kalıcı olarak silinecek. Geri getirilemez. Emin misin?`)) return;
+    await Promise.all(trash.map((t) => fetch("/api/trash?id=" + encodeURIComponent(t.id), { method: "DELETE" })));
+    setNote("Çöp kutusu boşaltıldı.");
+    loadTrash();
+  }
+
   async function exportAll() {
     if (!items?.length) return;
     setBusy("Yedek hazırlanıyor…");
@@ -254,6 +262,7 @@ export default function ProjectList({ onOpen, onLogout }: { onOpen: (id: string)
           {showTrash && (
             <>
               <p className="muted small">Silinen evler 30 gün burada kalır, sonra kendiliğinden silinir.</p>
+              <button className="danger" onClick={purgeAll}>🗑 Çöp kutusunu boşalt ({trash.length})</button>
               {trash.map((t) => (
                 <div className="trow" key={t.id}>
                   <div>

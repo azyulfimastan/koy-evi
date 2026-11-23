@@ -12,11 +12,11 @@ def run(w,h,sfx):
     pg.wait_for_selector(".cv canvas"); pg.click(".floors .v3btn.live"); pg.wait_for_selector(".live3 canvas"); pg.wait_for_timeout(2500)
     r={}
     pg.screenshot(path=f"/tmp/shots/{tag}-{sfx}-butonlar.png")
-    for name,sel,cls in (("live",".live3 .fsbtn","fs-live"),("plan",".cv .fsbtn","fs-plan")):
+    for name,sel,cls in (("plan",".cv .fsbtn","fs-plan"),):
       pg.locator(sel).click(); pg.wait_for_timeout(1000)
       r[name]=pg.locator(".stage."+cls).count()==1
       pg.locator(".fsback").click(); pg.wait_for_timeout(500)
-    pg.click(".floors .v3btn.on:not(.live), .floors .v3btn >> nth=0"); pg.wait_for_selector(".v3 canvas"); pg.wait_for_timeout(2500)
+    pg.locator(".live3 .fsbtn").click(); pg.wait_for_selector(".v3 canvas"); pg.wait_for_timeout(2500)
     pg.screenshot(path=f"/tmp/shots/{tag}-{sfx}-3dbtn.png")
     pg.locator(".fsbtn.m3").click(); pg.wait_for_timeout(1000)
     r["main3d"]=pg.locator(".stage.fs-main3d").count()==1

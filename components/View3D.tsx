@@ -40,7 +40,7 @@ type Api = {
 
 export type View3DCmd = { preset: Preset; n: number };
 
-export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onExit, onWallH, secPos = 0, secFlip = false, cmd }: { full: FullData; fi: number; v3: V3; name: string; walk: Walk; pan: boolean; sel: Pick3 | null; onPick: (p: Pick3 | null) => void; onExit: () => void; onWallH?: (floor: number, id: string, h: number, phase: "start" | "move") => void; secPos?: number; secFlip?: boolean; cmd?: View3DCmd }) {
+export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onExit, onWallH, onItemMove, secPos = 0, secFlip = false, cmd }: { full: FullData; fi: number; v3: V3; name: string; walk: Walk; pan: boolean; sel: Pick3 | null; onPick: (p: Pick3 | null) => void; onExit: () => void; onWallH?: (floor: number, id: string, h: number, phase: "start" | "move") => void; onItemMove?: (floor: number, id: string, x: number, y: number, phase: "start" | "move" | "end") => void; secPos?: number; secFlip?: boolean; cmd?: View3DCmd }) {
   const host = useRef<HTMLDivElement>(null);
   const compass = useRef<HTMLDivElement>(null);
   const api = useRef<Api | null>(null);
@@ -55,6 +55,8 @@ export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onE
   selRef.current = sel;
   const onWallHRef = useRef(onWallH);
   onWallHRef.current = onWallH;
+  const onItemMoveRef = useRef(onItemMove);
+  onItemMoveRef.current = onItemMove;
   const handle = useRef<HTMLDivElement>(null);
   const placeRef = useRef<() => void>(() => {});
   /** seçili duvarın üst orta noktasını ekrana yansıt, tutamacı oraya koy */
@@ -236,14 +238,23 @@ export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onE
       if (h.has("b")) mv -= 1;
       if (h.has("l")) st -= 1;
       if (h.has("r")) st += 1;
-      if (mv || st) {
+      const vy = (h.has("u") ? 1 : 0) - (h.has("d") ? 1 : 0);
+      if (ghostRef.current && (mv || st || vy)) {
+        // serbest uçuş (noclip): bakılan yöne uç, duvar/zemin/tavan engel değil
+        const sp = 3.2 * dt;
+        const cp = Math.cos(w.pitch);
+        w.x += (-Math.sin(w.yaw) * cp * mv + Math.cos(w.yaw) * st) * sp;
+        w.z += (-Math.cos(w.yaw) * cp * mv - Math.sin(w.yaw) * st) * sp;
+        w.y = Math.max(0.15, Math.min(60, w.y + (Math.sin(w.pitch) * mv + vy) * sp));
+        camera.position.set(w.x, w.y, w.z);
+        lamp.position.set(w.x, w.y, w.z);
+      } else if (mv || st) {
         const sp = 1.7 * dt;
         const nx = w.x + (-Math.sin(w.yaw) * mv + Math.cos(w.yaw) * st) * sp;
         const nz = w.z + (-Math.cos(w.yaw) * mv - Math.sin(w.yaw) * st) * sp;
         const fl = fullRef.current.floors[wk.floor];
-        const free = ghostRef.current;
-        if (free || !blocked(fl, nx, w.z)) w.x = nx;
-        if (free || !blocked(fl, w.x, nz)) w.z = nz;
+        if (!blocked(fl, nx, w.z)) w.x = nx;
+        if (!blocked(fl, w.x, nz)) w.z = nz;
         camera.position.set(w.x, w.y, w.z);
         lamp.position.x = w.x;
         lamp.position.z = w.z;
@@ -305,8 +316,41 @@ export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onE
       }
       onPickRef.current(null);
     };
+    /* eşyayı 3D'de tutup sürükleme: yatay düzlemde kayar, planla eş zamanlı */
+    let idrag: { floor: number; id: string; plane: THREE.Plane; ox: number; oy: number; pid: number; started: boolean } | null = null;
+    const planePt = (cx: number, cy: number, plane: THREE.Plane) => {
+      const r = dom.getBoundingClientRect();
+      ray.setFromCamera(new THREE.Vector2(((cx - r.left) / r.width) * 2 - 1, -((cy - r.top) / r.height) * 2 + 1), camera);
+      const v = new THREE.Vector3();
+      return ray.ray.intersectPlane(plane, v) ? v : null;
+    };
+    const tryItemDrag = (e: PointerEvent) => {
+      const a = api.current;
+      if (!a?.root || !onItemMoveRef.current || walkRef.current || e.button !== 0) return;
+      const r = dom.getBoundingClientRect();
+      ray.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), camera);
+      for (const h of ray.intersectObject(a.root, true)) {
+        const o = h.object as THREE.Mesh;
+        const mt = o.material as THREE.Material;
+        if (mt && mt.transparent) continue;
+        let pk: { pick?: string; id?: string } | null = null;
+        let fl = -1;
+        for (let p: THREE.Object3D | null = o; p; p = p.parent) {
+          if (!pk && p.userData.pick) pk = p.userData;
+          if (fl < 0 && typeof p.userData.floor === "number") fl = p.userData.floor;
+        }
+        if (pk?.pick !== "item" || !pk.id || fl < 0) return;
+        const it = fullRef.current.floors[fl]?.items.find((q) => q.id === pk!.id);
+        if (!it) return;
+        const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -h.point.y);
+        idrag = { floor: fl, id: pk.id, plane, ox: it.x - h.point.x, oy: it.y - h.point.z, pid: e.pointerId, started: false };
+        return;
+      }
+    };
     const onDown = (e: PointerEvent) => {
       if (e.button === 1) e.preventDefault();
+      idrag = null;
+      if (e.isPrimary) tryItemDrag(e);
       ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (ptrs.size === 1) tap = { x: e.clientX, y: e.clientY, t: performance.now(), ok: e.button === 0 || e.pointerType === "touch" };
       else if (tap) tap.ok = false;
@@ -329,6 +373,18 @@ export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onE
       const dy = e.clientY - prev.y;
       ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (tap && Math.hypot(e.clientX - tap.x, e.clientY - tap.y) > 6) tap.ok = false;
+      if (idrag && e.pointerId === idrag.pid && ptrs.size === 1) {
+        if (!idrag.started) {
+          if (!tap || tap.ok) return; // 6 px geçilene kadar tıklama sayılır
+          idrag.started = true;
+          a_ctl(false);
+          try { dom.setPointerCapture?.(e.pointerId); } catch { /* yoksay */ }
+          onItemMoveRef.current?.(idrag.floor, idrag.id, 0, 0, "start");
+        }
+        const pt = planePt(e.clientX, e.clientY, idrag.plane);
+        if (pt) onItemMoveRef.current?.(idrag.floor, idrag.id, pt.x + idrag.ox, pt.z + idrag.oy, "move");
+        return;
+      }
       if (!walkRef.current) return;
       const w = ws.current;
       if (ptrs.size === 1) {
@@ -344,7 +400,16 @@ export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onE
       moving = true;
       render();
     };
+    const a_ctl = (on: boolean) => { if (api.current) api.current.controls.enabled = on; };
     const onUp = (e: PointerEvent) => {
+      if (idrag && e.pointerId === idrag.pid) {
+        if (idrag.started) {
+          a_ctl(true);
+          onItemMoveRef.current?.(idrag.floor, idrag.id, 0, 0, "end");
+          tap = null; // sürükleme sonrası seçme yapma
+        }
+        idrag = null;
+      }
       if (moving && walkRef.current) {
         moving = false;
         render();
@@ -372,7 +437,7 @@ export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onE
     dom.addEventListener("mousedown", noMid);
     dom.addEventListener("auxclick", noMid);
 
-    const keyMap: Record<string, string> = { w: "f", arrowup: "f", s: "b", arrowdown: "b", a: "l", d: "r", q: "tl", arrowleft: "tl", e: "tr", arrowright: "tr" };
+    const keyMap: Record<string, string> = { w: "f", arrowup: "f", s: "b", arrowdown: "b", a: "l", d: "r", " ": "u", c: "d", shift: "d", q: "tl", arrowleft: "tl", e: "tr", arrowright: "tr" };
     const onKeyDown = (e: KeyboardEvent) => {
       if (!walkRef.current) return;
       const t = e.target as HTMLElement;
@@ -630,8 +695,8 @@ export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onE
         {walk ? (
           <>
             <button className="exit" onClick={onExit}>⬅ Dışarı çık</button>
-            <button className={"ghost3" + (ghost ? " on" : "")} onClick={() => setGhost((v) => !v)} title="Yürürken duvarlardan geçebilmek için aç">
-              {ghost ? <>👻 <span className="lg">Duvardan geç: açık</span><span className="sm">Duvar: geç</span></> : <>🧱 <span className="lg">Duvardan geç: kapalı</span><span className="sm">Duvar: dur</span></>}
+            <button className={"ghost3" + (ghost ? " on" : "")} onClick={() => setGhost((v) => !v)} title="Serbest uçuş: duvarlardan geç, bakılan yöne uç (Boşluk yüksel, C / Shift alçal)">
+              {ghost ? <>👻 <span className="lg">Serbest uçuş: açık</span><span className="sm">Uçuş: açık</span></> : <>🧱 <span className="lg">Serbest uçuş: kapalı</span><span className="sm">Uçuş: kapalı</span></>}
             </button>
             <button onClick={snapshot}>📷<span className="lg"> Resim indir</span></button>
             <button className="ph" onClick={openPhoto}>📸<span className="lg"> Gerçekçi fotoğraf</span><span className="sm"> Foto</span></button>
@@ -697,6 +762,8 @@ export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onE
             <button className="dn" {...hold("b")} aria-label="Geri">▼</button>
           </div>
           <div className="pad padr">
+            {ghost && <button {...hold("u")} aria-label="Yüksel">⤒</button>}
+            {ghost && <button {...hold("d")} aria-label="Alçal">⤓</button>}
             <button {...hold("tl")} aria-label="Sola dön">⟲</button>
             <button {...hold("tr")} aria-label="Sağa dön">⟳</button>
           </div>

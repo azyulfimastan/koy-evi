@@ -47,3 +47,8 @@ Sonra `tests/e2e` klasöründen (görüntüler `tests/shots/` içine düşer):
 | `gorsel.py`, `liste_gorsel.py` | örnek evin ekran görüntüleri |
 
 Örnek: `cd tests/e2e && python3 yedek_test.py http://localhost:3100 test1234 deneme`
+| `v29_test.py` | yan 3D'de eşyayı sürükle, 2D eş zamanlı |
+| `v30_test.py` | pencereyle köşe seç, açı/ölçü kutusu, orta tuşla gezinme |
+| `v31_test.py` | kenara çift tık (arsa), Esc, Büyüt tam 3D |
+| `v32_test.py` | ✂ Kırp aracı |
+| `v33_test.py` | adım adım izle: 2D / 3D / yan yana |

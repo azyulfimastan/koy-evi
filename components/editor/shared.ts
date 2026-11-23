@@ -2,7 +2,7 @@ import type { FullData, Pt } from "@/lib/types";
 
 export type View = { s: number; ox: number; oy: number };
 export type Saved = "saved" | "saving" | "error";
-export type Tool = "select" | "plot" | "wall" | "door" | "window" | "room" | "furn" | "env" | "stair" | "xstair" | "roof" | "build" | "balcony";
+export type Tool = "select" | "plot" | "wall" | "door" | "window" | "room" | "furn" | "env" | "stair" | "xstair" | "trim" | "roof" | "build" | "balcony";
 export type Sel =
   | null
   | { k: "pv"; i: number }
@@ -23,6 +23,7 @@ export const TOOL_HINT: Record<Tool, string> = {
   select: "Bir duvara, kapıya, pencereye veya odaya dokun. Duvarı sürükleyerek taşı.",
   plot: "",
   wall: "Duvarın başlangıcına dokun, sonra köşelere sırayla dokun. Çizerken rakam yazarak ölçü girebilirsin. Bitirmek için aynı noktaya tekrar dokun.",
+  trim: "Fazla uzayan duvar parçasına dokun: en yakın duvar kesişimine kadar kırpılır.",
   door: "Kapı koymak istediğin duvara dokun.",
   window: "Pencere koymak istediğin duvara dokun.",
   room: "Duvarlarla kapalı bir alanın içine dokun, oda otomatik oluşur.",
