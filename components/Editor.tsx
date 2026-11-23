@@ -2326,12 +2326,6 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
                   <span>Renk</span>
                   <input type="color" value={full.roof.color} onChange={(e) => apply({ ...data, roof: { ...full.roof, color: e.target.value } })} />
                 </label>
-                {full.roof.parts && full.roof.parts.length > 0 && (
-                  <div className="warnbox">
-                    Bu ev kanatlı: her blok için ayrı çatı kurulu. Duvarları değiştirdiysen çatı eski ölçüde kalır.
-                    <button onClick={() => apply({ ...data, roof: { ...full.roof, parts: undefined } })}>Çatıyı duvarlara göre tek parça yap</button>
-                  </div>
-                )}
                 {(() => {
                   const ri = roofInfo(full);
                   if (!ri) return <div className="muted small">Çatıyı görmek için önce duvarları çiz.</div>;
@@ -2341,7 +2335,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
                         <div><span>Tepe yüksekliği</span><b>{full.roof.kind === "flat" ? "—" : fmt(ri.ridgeHeight) + " m"}</b></div>
                         <div><span>Tavan arası ({fmt(ATTIC_MIN)} m üstü)</span><b>{ri.usable > 0 ? fmt(ri.usable) + " m²" : "yok"}</b></div>
                       </div>
-                      <div className="muted small">Çatı, en üst katın dış sınırına göre hesaplanır. Tavan arasını kat olarak kullanmak istersen “+ Kat” ile ekleyip duvarlarını alt kattan kopyalayabilirsin.</div>
+                      <div className="muted small">Çatı, en üst katın dış sınırına göre hesaplanır; L, T, U gibi şekillerde her kanada ayrı çatı kurulur. Tavan arasını kat olarak kullanmak istersen “+ Kat” ile ekleyip duvarlarını alt kattan kopyalayabilirsin.</div>
                     </>
                   );
                 })()}

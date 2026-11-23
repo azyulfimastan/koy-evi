@@ -4,7 +4,7 @@ import { placeExtStair } from "./stairs";
 
 /* Sihirbaz: girilen rakamlardan (oda, kat, balkon, çatı) otomatik ev üretir. */
 export type RoomType = "salon" | "salonmutfak" | "mutfak" | "yatak" | "cocuk" | "banyo" | "wc" | "calisma" | "depo";
-export type WRoom = { id: string; type: RoomType; w: number; d: number };
+export type WRoom = { id: string; type: RoomType; w: number; d: number; band?: "S" | "N"; block?: number; turn?: 0 | 1 | 2 | 3 /* eşya yönü: 0 normal, 1 yatay ayna, 2 dikey ayna, 3 ikisi (180°) */ };
 export type WBalcony = { id: string; floor: number; side: "N" | "E" | "S" | "W"; w: number; d: number };
 export type Side = "N" | "E" | "S" | "W";
 /** Kanat: bir bloğun bir cephesine eklenen dikdörtgen. to: bağlandığı blok (0 = ana blok, 1 = 1. kanat...) */
@@ -93,7 +93,7 @@ export function shapePreset(kind: "L" | "T" | "U", s: WSpec): { houseW: number; 
 }
 
 type Block = { x: number; y: number; w: number; d: number };
-type Cell = { x0: number; y0: number; x1: number; y1: number; b: number; name: string; type: RoomType | "hol"; want: number; hub?: boolean };
+type Cell = { turn?: number; x0: number; y0: number; x1: number; y1: number; b: number; name: string; type: RoomType | "hol"; want: number; hub?: boolean };
 type Piece = { e0: number; e1: number; wall: Wall; ext: boolean };
 
 const edgeOf = (b: Block, side: Side) =>
@@ -128,6 +128,8 @@ function buildBlocks(W: number, D: number, wings: WWing[], warnings: string[]): 
 
 export function generate(s: WSpec): WResult {
   const warnings: string[] = [];
+  const ord = new Map<string, number>();
+  s.rooms.forEach((l) => l.forEach((r, i) => ord.set(r.id, i)));
   const multi = s.floors > 1;
   const useAuto = s.autoSize && s.wings.length === 0;
   let { W, D } = useAuto ? autoHouse(s) : { W: s.houseW, D: s.houseD };
@@ -146,35 +148,40 @@ export function generate(s: WSpec): WResult {
   const split = (rs: WRoom[], hol: boolean) => {
     const order = [...rs].sort((a, b) => RT[a.type].front - RT[b.type].front);
     const tot = rs.reduce((a, r) => a + area(r), 0) + (hol ? 9 : 0);
-    const south: WRoom[] = [], north: WRoom[] = [];
-    let acc = hol ? 9 : 0;
+    const south: WRoom[] = order.filter((r) => r.band === "S"), north: WRoom[] = order.filter((r) => r.band === "N");
+    let acc = (hol ? 9 : 0) + south.reduce((a, r) => a + area(r), 0);
     for (const r of order) {
-      if (acc < tot / 2 - 0.01 || south.length === 0) { south.push(r); acc += area(r); } else north.push(r);
+      if (r.band) continue;
+      if (acc < tot / 2 - 0.01 || (south.length === 0 && !north.length)) { south.push(r); acc += area(r); } else north.push(r);
     }
-    if (!north.length && south.length > 1) north.push(south.pop()!);
-    return { south, north };
+    if (!north.length && south.length > 1 && !south.some((r) => r.band === "S")) north.push(south.pop()!);
+    const byList = (l: WRoom[]) => l.sort((a, b) => (ord.get(a.id) ?? 0) - (ord.get(b.id) ?? 0));
+    return { south: byList(south), north: byList(north) };
   };
   /** odaları bloklara dağıt: gündüz odaları ana bloğa, kalanlar kanatlara; her bloğa en az bir oda */
   const assign = (rs: WRoom[]): WRoom[][] => {
     const nb = blocks.length;
-    const order = [...rs].sort((a, b) => RT[a.type].front - RT[b.type].front);
+    const forced = rs.filter((r) => r.block !== undefined && r.block >= 0 && r.block < nb);
+    const order = rs.filter((r) => !forced.includes(r)).sort((a, b) => RT[a.type].front - RT[b.type].front);
     const capTot = blocks.reduce((a, b) => a + b.w * b.d, 0);
-    const total = order.reduce((a, r) => a + area(r), 0) + (multi ? 9 : 0);
+    const total = rs.reduce((a, r) => a + area(r), 0) + (multi ? 9 : 0);
     const out: WRoom[][] = blocks.map(() => []);
+    forced.forEach((r) => out[r.block!].push(r));
     let idx = 0;
     blocks.forEach((b, bi) => {
       const target = (total * (b.w * b.d)) / capTot;
-      let acc = bi === 0 && multi ? 9 : 0;
+      let acc = (bi === 0 && multi ? 9 : 0) + out[bi].reduce((a, r) => a + area(r), 0);
       const last = bi === nb - 1;
-      while (idx < order.length && (last || out[bi].length === 0 || acc + area(order[idx]) / 2 <= target) && order.length - idx > (nb - 1 - bi) - (last ? 0 : 0) - 0) {
-        if (!last && order.length - idx <= nb - 1 - bi) break;
+      const needAfter = blocks.slice(bi + 1).filter((_, k) => out[bi + 1 + k].length === 0).length;
+      while (idx < order.length && (last || (out[bi].length === 0 ? true : acc + area(order[idx]) / 2 <= target))) {
+        if (!last && order.length - idx <= needAfter) break;
         out[bi].push(order[idx]);
         acc += area(order[idx]);
         idx++;
       }
     });
     while (idx < order.length) out[nb - 1].push(order[idx++]);
-    out.forEach((l, bi) => { if (!l.length) l.push({ id: uid(), type: "calisma", w: 3, d: 3 }); void bi; });
+    out.forEach((l) => { if (!l.length) l.push({ id: uid(), type: "calisma", w: 3, d: 3 }); });
     return out;
   };
 
@@ -204,10 +211,10 @@ export function generate(s: WSpec): WResult {
       const rs = per[bi];
       const hol = multi && bi === 0;
       const cl = (x0: number, y0: number, x1: number, y1: number, r: WRoom | null, h = false) =>
-        cells.push({ x0: blk.x + x0, y0: blk.y + y0, x1: blk.x + x1, y1: blk.y + y1, b: bi, name: r ? named(r) : "Hol", type: r ? r.type : "hol", want: r ? area(r) : HOL_W * (y1 - y0), hub: h || undefined });
+        cells.push({ x0: blk.x + x0, y0: blk.y + y0, x1: blk.x + x1, y1: blk.y + y1, b: bi, name: r ? named(r) : "Hol", type: r ? r.type : "hol", want: r ? area(r) : HOL_W * (y1 - y0), hub: h || undefined, turn: r?.turn });
       if (!hol && blk.w < 4.8 && rs.length > 1) {
         // dar kanat: odalar alt alta
-        const order = [...rs].sort((a, b) => RT[a.type].front - RT[b.type].front);
+        const order = [...rs].sort((a, b) => (ord.get(a.id) ?? 0) - (ord.get(b.id) ?? 0));
         const sum = order.reduce((a, r) => a + area(r), 0);
         let y = 0;
         order.forEach((r, i) => {
@@ -430,6 +437,7 @@ export function generate(s: WSpec): WResult {
       for (const c of cells) {
         const cw = c.x1 - c.x0, cd = c.y1 - c.y0, cx = (c.x0 + c.x1) / 2;
         const m = 0.2;
+        const i0 = items.length;
         if (c.type === "salon" || c.type === "salonmutfak") {
           if (cw >= 3 && cd >= 3) {
             I("sofa3", "Üçlü kanepe", "sofa", cx - (c.type === "salonmutfak" ? cw * 0.18 : 0), c.y1 - 0.65 - m, 180, 2.2, 0.95, 0.85, "#8c9aa6");
@@ -462,6 +470,13 @@ export function generate(s: WSpec): WResult {
           }
         } else if (c.type === "wc") {
           I("wc", "Klozet", "toilet", cx, c.y1 - 0.45, 180, 0.4, 0.7, 0.8, "#f4f6f7");
+        }
+        if (c.turn) {
+          const mx2 = c.x0 + c.x1, my2 = c.y0 + c.y1;
+          for (const it of items.slice(i0)) {
+            if (c.turn === 1 || c.turn === 3) { it.x = mx2 - it.x; it.rot = (360 - it.rot) % 360; }
+            if (c.turn === 2 || c.turn === 3) { it.y = my2 - it.y; it.rot = (540 - it.rot) % 360; }
+          }
         }
       }
     }
@@ -507,7 +522,7 @@ export function generate(s: WSpec): WResult {
   const raw = {
     plot: { points: [{ x: minX - mx, y: minY - my }, { x: maxX + mx, y: minY - my }, { x: maxX + mx, y: maxY + my }, { x: minX - mx, y: maxY + my }], closed: true },
     snap: 0.1, defT: 0.25,
-    roof: { kind: s.roof, pitch: s.pitch, overhang: 0.5, ridge: "auto", color: "#a5523a", tex: "tile", ...(blocks.length > 1 ? { parts: blocks.map((b) => ({ x: b.x, y: b.y, w: b.w, d: b.d })) } : {}) },
+    roof: { kind: s.roof, pitch: s.pitch, overhang: 0.5, ridge: "auto", color: "#a5523a", tex: "tile" },
     floors, custom: [], build: { ...defaultBuild(), plinth: Math.max(0, s.plinth) },
     fin: { extColor: "#efe6d6", extTex: "plain", intColor: "#f4f0e8", intTex: "plain", doorColor: "#7a4a2a", frameColor: "#ffffff", groundColor: "#8fb45f", baseColor: "#a39b8e", baseTex: "stone" },
     env: {

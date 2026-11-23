@@ -3,7 +3,8 @@ import { mergeGeometries, mergeVertices } from "three/examples/jsm/utils/BufferG
 import type { EnvObj, FullData, Finish, Floor, Item, Opening, Stair } from "./types";
 import { FLOOR_DEFAULT, ROUGH, TEX_SIZE, getNormal, getTex } from "./textures";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
-import { inRegion, rasterize, regionAt, wallGeom } from "./rooms";
+import { inRegion, rasterize, regionAt, wallGeom, outsideMask } from "./rooms";
+export { outsideMask };
 import { roofInfo, roofParts, type RoofInfo } from "./roof";
 import { balconyRect } from "./balcony";
 import { terrainFn } from "./terrain";
@@ -194,38 +195,6 @@ function openingShape(a: number, b: number, bottom: number, top: number, shape: 
 }
 
 /** Dışarıdan erişilebilen hücreler (bina dışı) */
-export function outsideMask(r: NonNullable<ReturnType<typeof rasterize>>) {
-  const { w: W, h: H, blocked } = r;
-  const out = new Uint8Array(W * H);
-  const q = new Int32Array(W * H);
-  let head = 0;
-  let tail = 0;
-  const push = (i: number, j: number) => {
-    const k = j * W + i;
-    if (out[k] || blocked[k]) return;
-    out[k] = 1;
-    q[tail++] = k;
-  };
-  for (let i = 0; i < W; i++) {
-    push(i, 0);
-    push(i, H - 1);
-  }
-  for (let j = 0; j < H; j++) {
-    push(0, j);
-    push(W - 1, j);
-  }
-  while (head < tail) {
-    const k = q[head++];
-    const i = k % W;
-    const j = (k - i) / W;
-    if (i > 0) push(i - 1, j);
-    if (i < W - 1) push(i + 1, j);
-    if (j > 0) push(i, j - 1);
-    if (j < H - 1) push(i, j + 1);
-  }
-  return out;
-}
-
 export function outsideFn(fl: Floor) {
   const r = rasterize(fl.walls);
   if (!r) return () => true;

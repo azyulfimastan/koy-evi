@@ -82,7 +82,6 @@ export type Roof = {
   ridge: "auto" | "x" | "y";
   color: string;
   tex: string; // kaplama: tile | metal | shingle | plain
-  parts?: { x: number; y: number; w: number; d: number }[]; // çok kanatlı evlerde her blok için ayrı çatı (plan koordinatı, duvar eksenleri)
 };
 /** Tüm ev için malzeme ve renk ayarları (3B) */
 export type Finish = {

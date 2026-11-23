@@ -148,3 +148,36 @@ export function inRegion(reg: Region | null, p: Pt) {
   if (i < 0 || j < 0 || i >= reg.w || j >= reg.h) return false;
   return reg.mask[j * reg.w + i] === 1;
 }
+
+export function outsideMask(r: NonNullable<Raster>) {
+  const { w: W, h: H, blocked } = r;
+  const out = new Uint8Array(W * H);
+  const q = new Int32Array(W * H);
+  let head = 0;
+  let tail = 0;
+  const push = (i: number, j: number) => {
+    const k = j * W + i;
+    if (out[k] || blocked[k]) return;
+    out[k] = 1;
+    q[tail++] = k;
+  };
+  for (let i = 0; i < W; i++) {
+    push(i, 0);
+    push(i, H - 1);
+  }
+  for (let j = 0; j < H; j++) {
+    push(0, j);
+    push(W - 1, j);
+  }
+  while (head < tail) {
+    const k = q[head++];
+    const i = k % W;
+    const j = (k - i) / W;
+    if (i > 0) push(i - 1, j);
+    if (i < W - 1) push(i + 1, j);
+    if (j > 0) push(i, j - 1);
+    if (j < H - 1) push(i, j + 1);
+  }
+  return out;
+}
+

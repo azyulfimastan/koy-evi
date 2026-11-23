@@ -40,6 +40,7 @@ Sonra `tests/e2e` klasöründen (görüntüler `tests/shots/` içine düşer):
 | `v23_test.py` | sihirbaz: rakam gir, 2D + 3D önizleme, ev oluştur |
 | `v24_test.py` | kaide (yükseltilmiş temel) + dış merdiven: sihirbaz, editör aracı, Yapı paneli |
 | `v25_test.py` | sihirbaz ev şekilleri: L, T, U, kendi şeklim (kanatlar), çok parçalı çatı |
+| `v26_test.py` | otomatik çatı parçalama, sihirbazda oda sırası / yeri / eşya yönü |
 | `foto_test.py` | gerçekçi fotoğraf modu (küçük boyutta) |
 | `gorsel.py`, `liste_gorsel.py` | örnek evin ekran görüntüleri |
 

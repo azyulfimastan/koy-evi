@@ -62,6 +62,7 @@ export default function Wizard({ onClose, onCreated }: { onClose: () => void; on
   }
   const setRooms = (f: number, list: WRoom[]) => setS((x) => ({ ...x, rooms: x.rooms.map((r, i) => (i === f ? list : r)) }));
   const rooms = s.rooms[fl] ?? [];
+  const moveRoom = (i: number, d: number) => { const l = [...rooms]; const j = i + d; if (j < 0 || j >= l.length) return; [l[i], l[j]] = [l[j], l[i]]; setRooms(fl, l); };
   const patchRoom = (id: string, p: Partial<WRoom>) => setRooms(fl, rooms.map((r) => (r.id === id ? { ...r, ...p } : r)));
   const patchBal = (id: string, p: Partial<WBalcony>) => upd({ balconies: s.balconies.map((b) => (b.id === id ? { ...b, ...p } : b)) });
 
@@ -199,7 +200,7 @@ export default function Wizard({ onClose, onCreated }: { onClose: () => void; on
                 <span>Hazır:</span>
                 {PRESETS.map((p) => <button key={p.name} onClick={() => setRooms(fl, p.types.map(mkRoom))}>{p.name}</button>)}
               </div>
-              {rooms.map((r) => (
+              {rooms.map((r, ri) => (
                 <div className="wroom" key={r.id}>
                   <select value={r.type} onChange={(e) => patchRoom(r.id, { type: e.target.value as RoomType, w: RT[e.target.value as RoomType].w, d: RT[e.target.value as RoomType].d })} aria-label="Oda türü">
                     {(Object.keys(RT) as RoomType[]).map((k) => <option key={k} value={k}>{RT[k].name}</option>)}
@@ -207,13 +208,32 @@ export default function Wizard({ onClose, onCreated }: { onClose: () => void; on
                   <Num label="En (m)" v={r.w} on={(n) => patchRoom(r.id, { w: n })} min={1} max={15} step={0.1} />
                   <Num label="Boy (m)" v={r.d} on={(n) => patchRoom(r.id, { d: n })} min={1} max={15} step={0.1} />
                   <button className="wdel" aria-label="Odayı sil" onClick={() => setRooms(fl, rooms.filter((x) => x.id !== r.id))}>🗑</button>
+                  <div className="wopts">
+                    <button aria-label="Yukarı taşı" disabled={ri === 0} onClick={() => moveRoom(ri, -1)}>▲</button>
+                    <button aria-label="Aşağı taşı" disabled={ri === rooms.length - 1} onClick={() => moveRoom(ri, 1)}>▼</button>
+                    <label>Yer
+                      <select value={r.band ?? ""} onChange={(e) => patchRoom(r.id, { band: (e.target.value || undefined) as WRoom["band"] })} aria-label="Odanın yeri">
+                        <option value="">Otomatik</option><option value="S">Ön (yol)</option><option value="N">Arka</option>
+                      </select></label>
+                    {s.wings.length > 0 && (
+                      <label>Blok
+                        <select value={r.block ?? ""} onChange={(e) => patchRoom(r.id, { block: e.target.value === "" ? undefined : +e.target.value })} aria-label="Odanın bloğu">
+                          <option value="">Otomatik</option><option value={0}>Ana blok</option>
+                          {s.wings.map((_, k) => <option key={k} value={k + 1}>Kanat {k + 1}</option>)}
+                        </select></label>
+                    )}
+                    <label>Eşya yönü
+                      <select value={r.turn ?? 0} onChange={(e) => patchRoom(r.id, { turn: +e.target.value as WRoom["turn"] })} aria-label="Eşya yönü">
+                        <option value={0}>Normal</option><option value={1}>Yatay ayna</option><option value={2}>Dikey ayna</option><option value={3}>180° çevir</option>
+                      </select></label>
+                  </div>
                 </div>
               ))}
               <div className="wzchips small">
                 <span>+ Ekle:</span>
                 {(Object.keys(RT) as RoomType[]).map((k) => <button key={k} onClick={() => setRooms(fl, [...rooms, mkRoom(k)])}>{RT[k].name}</button>)}
               </div>
-              <p className="wznote">Ölçüler istek olarak alınır; ev dikdörtgen olduğu için odalar birbirine oranlanıp sığdırılır. Gerçek ölçüleri aşağıda görürsün.</p>
+              <p className="wznote">Ölçüler istek olarak alınır; odalar birbirine oranlanıp sığdırılır. Sıra (▲ ▼) soldan sağa dizilişi, “Yer” ön/arka bölgeyi, “Eşya yönü” odadaki eşyaların yönünü belirler. Gerçek ölçüleri aşağıda görürsün.</p>
               {res.full.floors[fi] && (
                 <div className="wzlist">
                   {res.rooms.filter((r) => r.floor === Math.min(fl, res.full.floors.length - 1)).map((r, i) => (

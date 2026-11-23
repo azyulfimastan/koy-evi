@@ -66,3 +66,41 @@ test("özel şekil: kanat başka kanada bağlanır, üst üste binen kanat redde
   assert.ok(r.warnings.some((w) => w.includes("biniyor")));
   assert.ok(r.houseW >= 12 && r.houseD >= 6);
 });
+
+import { roofParts } from "../../lib/roof";
+test("çatı duvarlara göre otomatik parçalanır: dikdörtgen 1, L 2, T 2, U 3, özel E-kanat 2", () => {
+  const t = (type: any, w: number, d: number) => ({ id: newId(), type, w, d });
+  const rooms = [t("salon", 5, 4), t("mutfak", 3.5, 3), t("yatak", 3.5, 3.5), t("yatak", 3, 3), t("cocuk", 3, 3), t("banyo", 2.2, 2.5)];
+  const base = (): WSpec => ({ ...defaultSpec(), autoSize: false, rooms: [rooms] });
+  assert.equal(roofParts(generate(base()).full).length, 1);
+  const exp: Record<string, number> = { L: 2, T: 2, U: 3 };
+  for (const k of ["L", "T", "U"] as const) {
+    const s = base();
+    const p = shapePreset(k, s);
+    Object.assign(s, { shape: k, houseW: p.houseW, houseD: p.houseD, wings: p.wings });
+    assert.equal(roofParts(generate(s).full).length, exp[k], k);
+  }
+  const c = { ...base(), houseW: 8, houseD: 6, wings: [{ id: newId(), to: 0, side: "E" as const, align: 0 as const, w: 4, d: 4 }] };
+  assert.equal(roofParts(generate(c).full).length, 2);
+});
+
+test("oda yeri, sırası, bloğu ve eşya yönü elle belirlenir", () => {
+  const t = (type: any, w: number, d: number, extra: object = {}) => ({ id: newId(), type, w, d, ...extra });
+  const a = t("yatak", 3.5, 3.5, { band: "S" });
+  const b = t("yatak", 3, 3);
+  const c = t("salon", 5, 4, { band: "N" });
+  const d = t("banyo", 2.2, 2.5);
+  const s: WSpec = { ...defaultSpec(), autoSize: false, houseW: 10, houseD: 8, rooms: [[b, a, c, d]] };
+  const r = generate(s);
+  const rooms = r.full.floors[0].rooms;
+  const y = (n: string) => rooms.find((q) => q.name.startsWith(n))!.seed.y;
+  assert.ok(y("Salon") < y("Yatak odası "), "zorla arka: salon kuzeyde (küçük y)");
+  // eşya yönü: yatak odasındaki yatak aynalanınca x merkezin diğer yanına geçer
+  const x0 = (spec: WSpec) => { const rr = generate(spec); const it = rr.full.floors[0].items.find((q) => q.key === "bed2")!; return it.x; };
+  const base = x0({ ...s, rooms: [[t("yatak", 5, 4, { turn: 0 })]], wings: [] });
+  const mir = x0({ ...s, rooms: [[t("yatak", 5, 4, { turn: 1 })]], wings: [] });
+  assert.ok(Math.abs(base - 5) < 0.2 && Math.abs(mir - 5) < 0.2);
+  const k = (turn: 0 | 3) => { const rr = generate({ ...s, rooms: [[t("yatak", 5, 4, { turn })]], wings: [] }); return rr.full.floors[0].items.find((q) => q.key === "bed2")!; };
+  assert.ok(Math.abs(k(0).y + k(3).y - 8) < 0.2, "180° çevirince y simetrik");
+  assert.equal((k(0).rot + 180) % 360, k(3).rot);
+});
