@@ -23,6 +23,17 @@ export type Stair = {
   w: number; // basamak genişliği (m)
   mirror: boolean;
 };
+export type Balcony = {
+  id: string;
+  wall: string; // bağlı olduğu duvar
+  pos: number; // duvar başından merkeze uzaklık (m)
+  w: number; // duvar boyunca genişlik (m)
+  d: number; // dışarı çıkma (m)
+  side: 1 | -1; // duvarın hangi yanı
+  rail: "bars" | "glass" | "solid";
+  railH: number;
+  slabT: number;
+};
 export type Shape = "rect" | "round" | "bed" | "sofa" | "chair" | "cooker" | "sink" | "toilet" | "tub" | "shower" | "rug" | "stove" | "wardrobe";
 export type CatItem = { key: string; name: string; cat: string; w: number; d: number; h: number; shape: Shape; color: string; elev?: number };
 export type Item = { id: string; key: string; name: string; shape: Shape; x: number; y: number; rot: number; w: number; d: number; h: number; elev: number; color: string };
@@ -58,6 +69,7 @@ export type Floor = {
   stairs: Stair[];
   items: Item[];
   cols?: Col[];
+  balconies?: Balcony[];
 };
 export type Roof = {
   kind: "none" | "gable" | "hip" | "shed" | "flat"; // none = çatı yok (varsayılan)
@@ -84,6 +96,7 @@ export type FullData = { plot: Plot; snap: number; defT: number; roof: Roof; flo
 
 /** Editörün o an çalıştığı kat + ortak ayarlar (düz görünüm) */
 export type PlanData = {
+  balconies: Balcony[];
   plot: Plot;
   snap: number;
   defT: number;
@@ -128,6 +141,7 @@ export function normalizeFull(d: any): FullData {
       stairs: f.stairs ?? [],
       items: f.items ?? [],
       cols: f.cols ?? [],
+      balconies: f.balconies ?? [],
     }));
   } else {
     // v0.2 verisi: tek katlı düz yapı
@@ -164,13 +178,14 @@ export function flatten(f: FullData, i: number): PlanData {
     items: fl.items,
     custom: f.custom,
     cols: fl.cols ?? [],
+    balconies: fl.balconies ?? [],
     build: f.build ?? defaultBuild(),
   };
 }
 
 export function unflatten(f: FullData, i: number, d: PlanData): FullData {
   const floors = f.floors.map((fl, k) =>
-    k === i ? { ...fl, name: d.name, height: d.height, walls: d.walls, openings: d.openings, rooms: d.rooms, stairs: d.stairs, items: d.items, cols: d.cols } : fl
+    k === i ? { ...fl, name: d.name, height: d.height, walls: d.walls, openings: d.openings, rooms: d.rooms, stairs: d.stairs, items: d.items, cols: d.cols, balconies: d.balconies } : fl
   );
   return { plot: d.plot, snap: d.snap, defT: d.defT, roof: d.roof, floors, custom: d.custom, fin: d.fin, env: d.env, build: d.build };
 }

@@ -7,6 +7,7 @@ import { drawItem } from "@/lib/furniture";
 import { dist, fmt } from "@/lib/geo";
 import { ENV_KINDS, drawEnv } from "@/lib/env";
 import { floorColor, roomImage, texPattern } from "@/lib/plan2d";
+import { balconyRect } from "@/lib/balcony";
 import { floorCols } from "@/lib/stages";
 import { WALL_COLOR, defaults, type Sel, type SnapInfo, type Tool, type View } from "./shared";
 
@@ -238,6 +239,29 @@ export function drawPlan(c: HTMLCanvasElement, el: HTMLDivElement, st: PlanState
   for (const st of stairs) {
     const isSel = sel?.k === "stair" && sel.id === st.id;
     drawStair(g, st, data.height, s, ox, oy, { color: isSel ? "#d9822b" : "#3d382f", fill: "rgba(255,255,255,0.7)", lw: isSel ? 2.5 : 1.3 });
+  }
+  // balkonlar
+  for (const b of data.balconies ?? []) {
+    const w = walls.find((q) => q.id === b.wall);
+    if (!w) continue;
+    const r = balconyRect(w, b);
+    const isSel = sel?.k === "balcony" && sel.id === b.id;
+    g.beginPath();
+    r.pts.forEach((pt, k) => { const q = S(pt); if (k) g.lineTo(q.x, q.y); else g.moveTo(q.x, q.y); });
+    g.closePath();
+    g.fillStyle = isSel ? "rgba(217,130,43,0.28)" : "rgba(160,158,150,0.35)";
+    g.fill();
+    g.strokeStyle = isSel ? "#d9822b" : "#5d5a52";
+    g.lineWidth = isSel ? 2.5 : 1.6;
+    g.setLineDash([]);
+    g.beginPath();
+    [r.pts[1], r.pts[2], r.pts[3], r.pts[0]].forEach((pt, k) => { const q = S(pt); if (k) g.lineTo(q.x, q.y); else g.moveTo(q.x, q.y); });
+    g.stroke();
+    const cc = S(r.P(0, r.o0 + b.d / 2));
+    g.fillStyle = "#5d5a52";
+    g.font = "11px sans-serif";
+    g.textAlign = "center";
+    g.fillText("Balkon", cc.x, cc.y + 4);
   }
   // eşyalar (halılar altta)
   const ordered = [...items].sort((a, b) => (a.shape === "rug" ? 0 : 1) - (b.shape === "rug" ? 0 : 1));

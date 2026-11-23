@@ -1,9 +1,10 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CatItem, FullData, Item, Opening, PlanData, Pt, Room, Stair, Wall } from "@/lib/types";
+import type { Balcony, CatItem, FullData, Item, Opening, PlanData, Pt, Room, Stair, Wall } from "@/lib/types";
 import { flatten, newFloor, normalizeFull, uid, unflatten, defaultFull, defaultBuild } from "@/lib/types";
 import { roofInfo, ATTIC_MIN } from "@/lib/roof";
 import { buildStages, floorCols } from "@/lib/stages";
+import { defaultBalcony, inBalcony } from "@/lib/balcony";
 import { stairBox, stairLocal, stairSteps } from "@/lib/stairs";
 import { CATALOG, CATS, itemLocal } from "@/lib/furniture";
 import { area, bounds, dist, fmt, perimeter, round3, setEdgeLength, snapTo, segProject } from "@/lib/geo";
@@ -778,6 +779,26 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
       return;
     }
 
+    if (t === "balcony") {
+      drag.current = pan(() => {
+        const cur = dataRef.current;
+        const pos = toWorld(p.x, p.y);
+        const wl = hitWall(pos, 24);
+        if (!wl) return;
+        const pr = segProject(pos, wl.a, wl.b);
+        const L = pr.L;
+        const df = defaultBalcony();
+        const bw = Math.min(df.w, Math.max(0.6, L - 0.2));
+        const cross = (wl.b.x - wl.a.x) * (pos.y - wl.a.y) - (wl.b.y - wl.a.y) * (pos.x - wl.a.x);
+        const b: Balcony = { id: uid(), wall: wl.id, pos: round3(Math.max(bw / 2, Math.min(L - bw / 2, pr.t * L))), side: cross >= 0 ? 1 : -1, ...df, w: bw };
+        apply({ ...cur, balconies: [...(cur.balconies ?? []), b] });
+        setSel({ k: "balcony", id: b.id });
+        setTool("select");
+        setHover(null);
+      });
+      return;
+    }
+
     if (t === "build") {
       drag.current = pan(() => {
         const cur = dataRef.current;
@@ -853,6 +874,13 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
       if (Math.abs(lp.x) <= it.w / 2 && Math.abs(lp.y) <= it.d / 2) {
         setSel({ k: "item", id: it.id });
         drag.current = { kind: "imove", id: it.id, start: w, x0: it.x, y0: it.y, before: cloneFull(), moved: false };
+        return;
+      }
+    }
+    for (const b of d.balconies ?? []) {
+      const bw = d.walls.find((q) => q.id === b.wall);
+      if (bw && inBalcony(bw, b, w)) {
+        setSel({ k: "balcony", id: b.id });
         return;
       }
     }
@@ -1068,11 +1096,13 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
       if (d.plot.closed && d.plot.points.length <= 3) return;
       apply({ ...d, plot: { ...d.plot, points: d.plot.points.filter((_, i) => i !== s.i) } });
     } else if (s.k === "wall") {
-      apply({ ...d, walls: d.walls.filter((w) => w.id !== s.id), openings: d.openings.filter((o) => o.wall !== s.id) });
+      apply({ ...d, walls: d.walls.filter((w) => w.id !== s.id), openings: d.openings.filter((o) => o.wall !== s.id), balconies: (d.balconies ?? []).filter((b) => b.wall !== s.id) });
     } else if (s.k === "op") {
       apply({ ...d, openings: d.openings.filter((o) => o.id !== s.id) });
     } else if (s.k === "room") {
       apply({ ...d, rooms: d.rooms.filter((r) => r.id !== s.id) });
+    } else if (s.k === "balcony") {
+      apply({ ...d, balconies: (d.balconies ?? []).filter((q) => q.id !== s.id) });
     } else if (s.k === "stair") {
       apply({ ...d, stairs: d.stairs.filter((q) => q.id !== s.id) });
     } else if (s.k === "item") {
@@ -1263,6 +1293,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
   const selOpWall = selOp ? walls.find((w) => w.id === selOp.wall) : undefined;
   const selRoom = sel?.k === "room" ? rooms.find((r) => r.id === sel.id) : undefined;
   const selItem = sel?.k === "item" ? items.find((q) => q.id === sel.id) : undefined;
+  const selBal = sel?.k === "balcony" ? (data.balconies ?? []).find((q) => q.id === sel.id) : undefined;
   const selStair = sel?.k === "stair" ? stairs.find((q) => q.id === sel.id) : undefined;
   const totalRoomArea = rooms.reduce((s, r) => {
     const reg = regions.get(r.id);
@@ -1291,6 +1322,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
     ["furn", "Eşya"],
     ["env", "Çevre"],
     ["stair", "Merdiven"],
+    ["balcony", "Balkon"],
     ["build", "Yapı"],
     ["roof", "Çatı"],
   ];
@@ -1992,6 +2024,44 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
               </>
             )}
 
+            {tool !== "plot" && selBal && (() => {
+              const bw = data.walls.find((q) => q.id === selBal.wall);
+              const L = bw ? Math.hypot(bw.b.x - bw.a.x, bw.b.y - bw.a.y) : 0;
+              const patch = (f: (q: Balcony) => Balcony) => apply({ ...data, balconies: (data.balconies ?? []).map((q) => (q.id === selBal.id ? f(q) : q)) });
+              return (
+                <>
+                  <h3>Balkon</h3>
+                  <NumField key={selBal.id + ":w:" + selBal.w} label="Genişlik (cm)" value={selBal.w * 100} decimals={0}
+                    onCommit={(v) => patch((q) => { const w2 = round3(Math.max(0.6, Math.min(L || 8, v / 100))); return { ...q, w: w2, pos: round3(Math.max(w2 / 2, Math.min(L - w2 / 2, q.pos))) }; })} />
+                  <NumField key={selBal.id + ":d:" + selBal.d} label="Dışarı çıkma (cm)" value={selBal.d * 100} decimals={0}
+                    onCommit={(v) => patch((q) => ({ ...q, d: round3(Math.max(0.6, Math.min(4, v / 100))) }))} />
+                  <NumField key={selBal.id + ":p:" + selBal.pos} label="Duvar başından konum (cm)" value={selBal.pos * 100} decimals={0}
+                    onCommit={(v) => patch((q) => ({ ...q, pos: round3(Math.max(q.w / 2, Math.min(L - q.w / 2, v / 100))) }))} />
+                  <label className="edge">
+                    <span>Korkuluk</span>
+                    <select value={selBal.rail} onChange={(e) => patch((q) => ({ ...q, rail: e.target.value as Balcony["rail"] }))}>
+                      <option value="bars">Demir parmaklık</option>
+                      <option value="glass">Cam</option>
+                      <option value="solid">Duvar (beton)</option>
+                    </select>
+                  </label>
+                  <NumField key={selBal.id + ":h:" + selBal.railH} label="Korkuluk yüksekliği (cm)" value={selBal.railH * 100} decimals={0}
+                    onCommit={(v) => patch((q) => ({ ...q, railH: round3(Math.max(0.8, Math.min(1.4, v / 100))) }))} />
+                  <NumField key={selBal.id + ":t:" + selBal.slabT} label="Döşeme kalınlığı (cm)" value={selBal.slabT * 100} decimals={0}
+                    onCommit={(v) => patch((q) => ({ ...q, slabT: round3(Math.max(0.1, Math.min(0.4, v / 100))) }))} />
+                  <div className="row">
+                    <button onClick={() => patch((q) => ({ ...q, side: (q.side === 1 ? -1 : 1) as 1 | -1 }))}>⇄ Diğer yöne çevir</button>
+                  </div>
+                  <div className="stats">
+                    <div><span>Alan</span><b>{fmt(selBal.w * selBal.d)} m²</b></div>
+                    <div><span>Korkuluk</span><b>{fmt(selBal.w + 2 * selBal.d)} m</b></div>
+                  </div>
+                  <div className="muted small">Balkon kapısı için aynı duvara Kapı aracıyla kapı ekle. Korkuluk yüksekliği yönetmeliklerde en az 100 cm istenir.</div>
+                  <button className="danger" onClick={deleteSel}>Balkonu sil</button>
+                </>
+              );
+            })()}
+
             {/* --- Yapı: temel, şap, beton, direk --- */}
             {tool === "build" && (() => {
               const b = full.build ?? defaultBuild();
@@ -2096,7 +2166,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
             )}
 
             {/* --- Genel --- */}
-            {tool !== "plot" && tool !== "roof" && tool !== "build" && tool !== "furn" && tool !== "env" && !selWall && !selOp && !selRoom && !selStair && !selItem && !selEnv && (
+            {tool !== "plot" && tool !== "roof" && tool !== "build" && tool !== "balcony" && tool !== "furn" && tool !== "env" && !selWall && !selOp && !selRoom && !selStair && !selBal && !selItem && !selEnv && (
               <>
                 <h3>{data.name}</h3>
                 <label className="edge">

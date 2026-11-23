@@ -160,7 +160,7 @@ function villa() {
     const V1 = W([4, 5.5], [4, 9], 0.15); const V2 = W([8, 5.5], [8, 9], 0.15);
     paint(f, n, { int: "#c4cfe3" }); paint(f, w, { int: "#e6cfd3", ext: "#d6c3a3" }); paint(f, e, { ext: "#d6c3a3" });
     O(n, 5.5, 0.8, 1.4, 0.9, "window"); O(n, 9.5, 1.4, 1.4, 0.9, "window"); O(w, 6.5, 1.4, 1.4, 0.9, "window"); O(w, 2, 0.8, 0.6, 1.5, "window");
-    O(s, 2, 0.8, 0.6, 1.5, "window"); O(s, 6, 1.2, 1.4, 0.9, "window"); O(s, 10, 1.4, 1.3, 0.9, "window"); O(e, 2.5, 1.2, 1.4, 0.9, "window"); O(e, 7, 1.2, 1.3, 0.9, "window");
+    O(s, 2, 0.8, 0.6, 1.5, "window"); O(s, 6, 1.6, 2.2, 0, "door"); O(s, 10, 1.4, 1.3, 0.9, "window"); (f as any).balconies = [{ id: uid(), wall: s, pos: 6, w: 3.2, d: 1.4, side: -1, rail: "glass", railH: 1.0, slabT: 0.15 }]; O(e, 2.5, 1.2, 1.4, 0.9, "window"); O(e, 7, 1.2, 1.3, 0.9, "window");
     O(M, 5, 0.9, 2.1, 0, "door"); O(M, 7.4, 0.9, 2.1, 0, "door", "rect", true); O(V1, 1.4, 0.8, 2.1, 0, "door"); O(V2, 1.4, 0.9, 2.1, 0, "door");
     R("Ana yatak odası", 3, 3, "#d9d2ef", "parquet"); R("Çocuk odası", 9, 3, "#f6d6c8", "laminate"); R("Banyo 2", 2, 7, "#cde6f2", "fayans"); R("Sahanlık", 6, 8, "#eadfcf", "parquet"); R("Çalışma odası", 10, 7.5, "#e3efd0", "laminate");
     I("bed2", "Çift kişilik yatak", "bed", 3.2, 1.15, 0, 1.6, 2, 0.5, "#d9c3a0"); I("night", "Komodin", "rect", 2.0, 0.4, 0, 0.45, 0.4, 0.5, "#9a7b5a"); I("night", "Komodin", "rect", 4.4, 0.4, 0, 0.45, 0.4, 0.5, "#9a7b5a");

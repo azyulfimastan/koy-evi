@@ -42,6 +42,7 @@ export function computeReport(f: FullData): Report {
   const opens = new Map<string, number>();
   const items = new Map<string, number>();
   let stairs = 0;
+  let balN = 0, balVol = 0, balRail = 0, balArea = 0;
   let foundLen = 0,
     beamVol = 0,
     slabVol = 0,
@@ -104,6 +105,13 @@ export function computeReport(f: FullData): Report {
       if (fi === 0) footprint += a;
     }
     stairs += fl.stairs.length;
+    for (const b of fl.balconies ?? []) {
+      if (!fl.walls.some((q) => q.id === b.wall)) continue;
+      balN += 1;
+      balArea += b.w * b.d;
+      balVol += b.w * b.d * b.slabT;
+      balRail += b.w + 2 * b.d;
+    }
     if (fl.walls.length) {
       const len = fl.walls.reduce((sum, w) => sum + Math.hypot(w.b.x - w.a.x, w.b.y - w.a.y), 0);
       beamVol += fl.walls.reduce((sum, w) => sum + Math.hypot(w.b.x - w.a.x, w.b.y - w.a.y) * w.t * 0.2, 0);
@@ -150,6 +158,11 @@ export function computeReport(f: FullData): Report {
     if (ri.usable > 0) add("Çatı arası kullanılabilir alan (≥1,80 m)", ri.usable, "m²");
   }
   if (stairs) add("Merdiven", stairs, "adet");
+  if (balN) {
+    add("Balkon", balN, "adet");
+    add("Balkon döşemesi (beton)", balVol, "m³", `${r2(balArea)} m² alan`);
+    add("Balkon korkuluğu", balRail, "m");
+  }
 
   const openings: Line[] = [...opens].sort().map(([name, qty]) => ({ name, qty, unit: "adet" }));
   const itemL: Line[] = [...items].sort((a, b) => a[0].localeCompare(b[0], "tr")).map(([name, qty]) => ({ name, qty, unit: "adet" }));

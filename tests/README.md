@@ -27,6 +27,7 @@ Sonra `tests/e2e` klasöründen (görüntüler `tests/shots/` içine düşer):
 | `rehber_test.py` | adım adım yönlendirme |
 | `kesit_test.py` | yatay/dikey kesit, kata tepeden bakış, duvardan geçme |
 | `yedek_test.py` | şablon, yedek indir/yükle, sürüm geçmişi, çöp kutusu |
+| `balkon_test.py` | balkon aracı, panel, şablondaki balkon, 3D |
 | `insaat_test.py` | çatı yok, inşaat aşamaları, orta tuşla döndürme, duvarı tutup yukarı çekme, direkler |
 | `akicilik_test.py` | telefon hızında kare süreleri (2D önizleme, kaydırma, 3D döndürme) |
 | `cizim_test.py` | duvar çizerken 90° kilidi, rakamla ölçü, çift tıkla ölçü, 90° yap |

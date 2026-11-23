@@ -5,6 +5,8 @@ import { FLOOR_DEFAULT, ROUGH, TEX_SIZE, getNormal, getTex } from "./textures";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import { inRegion, rasterize, regionAt, wallGeom } from "./rooms";
 import { roofInfo } from "./roof";
+import { balconyRect } from "./balcony";
+import type { Balcony } from "./types";
 import { stairBox, stairLocal, stairSteps, TREAD } from "./stairs";
 import { buildStages, floorCols, reached } from "./stages";
 import { defaultBuild } from "./types";
@@ -742,6 +744,53 @@ function buildRoomFloors(fl: Floor, below: Floor | null, base: number, clip: THR
 }
 
 /* ---------------- merdiven ---------------- */
+function buildBalconies(fl: Floor, base: number, m: Mats, g: THREE.Group) {
+  for (const b of fl.balconies ?? []) {
+    const w = fl.walls.find((q) => q.id === b.wall);
+    if (!w) continue;
+    const r = balconyRect(w, b);
+    const grp = new THREE.Group();
+    grp.position.set(r.c.x, base, r.c.y);
+    grp.rotation.y = -Math.atan2(r.u.y, r.u.x);
+    const s = b.side;
+    const add = (sx: number, sy: number, sz: number, x: number, y: number, z: number, mat: THREE.Material) => {
+      const me = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), mat);
+      me.position.set(x, y, s * z);
+      me.castShadow = true;
+      me.receiveShadow = true;
+      grp.add(me);
+    };
+    const z0 = r.o0, z1 = r.o0 + b.d;
+    add(b.w, b.slabT, b.d, 0, -b.slabT / 2, (z0 + z1) / 2, m.concrete);
+    const H = b.railH;
+    // korkuluk: ön ve iki yan
+    const runs: [number, number, number, number][] = [
+      [-b.w / 2, z1 - 0.03, b.w / 2, z1 - 0.03],
+      [-b.w / 2 + 0.03, z0, -b.w / 2 + 0.03, z1],
+      [b.w / 2 - 0.03, z0, b.w / 2 - 0.03, z1],
+    ];
+    for (const [xa, za, xb, zb] of runs) {
+      const len = Math.hypot(xb - xa, zb - za);
+      const cx = (xa + xb) / 2, cz = (za + zb) / 2;
+      const alongX = Math.abs(xb - xa) > 0.001;
+      if (b.rail === "solid") add(alongX ? len : 0.1, H, alongX ? 0.1 : len, cx, H / 2, cz, m.concrete);
+      else {
+        if (b.rail === "glass") add(alongX ? len : 0.02, H - 0.08, alongX ? 0.02 : len, cx, (H - 0.08) / 2 + 0.02, cz, m.glass);
+        else {
+          const n = Math.max(2, Math.round(len / 0.12));
+          for (let k = 0; k <= n; k++) {
+            const t = k / n;
+            add(0.03, H, 0.03, xa + (xb - xa) * t, H / 2, za + (zb - za) * t, m.metal);
+          }
+        }
+        add(alongX ? len : 0.06, 0.05, alongX ? 0.06 : len, cx, H, cz, m.metal);
+        if (b.rail === "bars") add(alongX ? len : 0.02, 0.025, alongX ? 0.02 : len, cx, 0.1, cz, m.metal);
+      }
+    }
+    g.add(grp);
+  }
+}
+
 function buildStair(st: Stair, H: number, base: number, m: Mats, g: THREE.Group) {
   const { treads } = stairSteps(H);
   const { W, D } = stairBox(st, H);
@@ -1683,12 +1732,14 @@ export function buildHouse(f: FullData, fi: number, v: V3, secPlane?: THREE.Plan
       if (R("cols", i) && !R("walls", i)) buildCols(f, i, bases[i], plain, fg);
       if (R("walls", i)) buildWalls(fl, bases[i], m, false, fg, i, R("fit", i));
       if (R("slab", i)) buildSlab(fl, fl, bases[i] + fl.height, plain, fg, plain.concrete, bld.slabT);
+      if (R("walls", i)) buildBalconies(fl, bases[i], plain, fg);
       continue;
     }
     buildSlab(fl, i > 0 ? f.floors[i - 1] : null, bases[i], plain, fg, undefined, bld.slabT);
     buildRoomFloors(fl, i > 0 ? f.floors[i - 1] : null, bases[i], m.clip, fg);
     buildWalls(fl, bases[i], m, !!v.cut && i === topShown, fg, i);
     for (const st of fl.stairs) buildStair(st, fl.height, bases[i], m, fg);
+    buildBalconies(fl, bases[i], plain, fg);
     if (v.items) for (const it of fl.items) buildItem(it, bases[i], m, fg);
     if (bld.topSlab && i === topWalls && !v.cut) buildSlab(fl, fl, bases[i] + fl.height, plain, fg, undefined, bld.slabT);
   }
