@@ -1410,6 +1410,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
       if (t.tagName === "INPUT" || t.tagName === "SELECT") return;
+      if (e.key === "Escape" && fsRef.current) { setFs(null); return; }
       if (is3dRef.current) return;
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
         e.preventDefault();
@@ -1621,15 +1622,18 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
       )}
       {showRep && <Report full={full} name={name} onClose={() => setShowRep(false)} onPrices={(pr) => setFull((f) => ({ ...f, prices: pr }))} />}
       <div className={"stage" + (fs ? " fs fs-" + fs : "")} onPointerDownCapture={stageDownCap} onPointerMoveCapture={stageMoveCap} onPointerUpCapture={stageUpCap}>
+        {is3d && !fs && <button className="fsbtn m3" onClick={() => setFs("main3d")} aria-label="3D görünümü tam ekran yap">⤢ Büyüt</button>}
         {fs && <button className="fsback" onClick={() => setFs(null)} aria-label="Tam ekrandan çık">⤡ Geri dön</button>}
         {is3d && <View3D full={full} fi={fi} v3={v3eff} name={name} walk={walk} pan={pan3} sel={pick3} onPick={setPick3} onExit={() => setWalk(null)} onWallH={onWallH} secPos={secPos} secFlip={secFlip} cmd={cmd3} />}
         {!is3d && live3 && (
           <div className="live3" aria-label="Canlı 3D önizleme">
             <View3D full={dfull} fi={fi} v3={liveV3} name={name} walk={null} pan={false} sel={null} onPick={noop} onExit={noop} />
             <span className="live3tag">Canlı 3D</span>
+            {!fs && <button className="fsbtn br" onClick={() => setFs("live")} aria-label="3D'yi tam ekran yap">⤢ Büyüt</button>}
           </div>
         )}
         <div className="cv" ref={wrap} style={is3d ? { display: "none" } : undefined}>
+          {!is3d && live3 && !fs && <button className="fsbtn tr" onClick={() => setFs("plan")} aria-label="2D planı tam ekran yap">⤢ Büyüt</button>}
           <canvas
             ref={cv}
             onPointerDown={onDown}
