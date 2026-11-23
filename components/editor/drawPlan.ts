@@ -7,6 +7,7 @@ import { drawItem } from "@/lib/furniture";
 import { dist, fmt } from "@/lib/geo";
 import { ENV_KINDS, drawEnv } from "@/lib/env";
 import { floorColor, roomImage, texPattern } from "@/lib/plan2d";
+import { floorCols } from "@/lib/stages";
 import { WALL_COLOR, defaults, type Sel, type SnapInfo, type Tool, type View } from "./shared";
 
 export type PlanState = {
@@ -265,6 +266,24 @@ export function drawPlan(c: HTMLCanvasElement, el: HTMLDivElement, st: PlanState
       const a = S(chain);
       const b = S(hover);
       label(g, fmt(L) + " m", (a.x + b.x) / 2, (a.y + b.y) / 2 - 16, "#8a4b0b");
+    }
+  }
+  if (tool === "build") {
+    const b = full.build;
+    const sz = Math.max(6, (b?.colSize ?? 0.25) * s);
+    for (const c of floorCols(full, fi)) {
+      const q = S({ x: c.x, y: c.y });
+      g.fillStyle = c.manual ? "#2d5f9a" : "#7d8a99";
+      g.strokeStyle = "#ffffff";
+      g.lineWidth = 1.5;
+      g.fillRect(q.x - sz / 2, q.y - sz / 2, sz, sz);
+      g.strokeRect(q.x - sz / 2, q.y - sz / 2, sz, sz);
+    }
+    if (hover) {
+      const h = S(hover);
+      g.strokeStyle = "#2d5f9a";
+      g.lineWidth = 2;
+      g.strokeRect(h.x - sz / 2, h.y - sz / 2, sz, sz);
     }
   }
   if (tool === "wall" && hover) {

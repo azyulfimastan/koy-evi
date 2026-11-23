@@ -40,7 +40,7 @@ type Api = {
 
 export type View3DCmd = { preset: Preset; n: number };
 
-export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onExit, secPos = 0, secFlip = false, cmd }: { full: FullData; fi: number; v3: V3; name: string; walk: Walk; pan: boolean; sel: Pick3 | null; onPick: (p: Pick3 | null) => void; onExit: () => void; secPos?: number; secFlip?: boolean; cmd?: View3DCmd }) {
+export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onExit, onWallH, secPos = 0, secFlip = false, cmd }: { full: FullData; fi: number; v3: V3; name: string; walk: Walk; pan: boolean; sel: Pick3 | null; onPick: (p: Pick3 | null) => void; onExit: () => void; onWallH?: (floor: number, id: string, h: number, phase: "start" | "move") => void; secPos?: number; secFlip?: boolean; cmd?: View3DCmd }) {
   const host = useRef<HTMLDivElement>(null);
   const compass = useRef<HTMLDivElement>(null);
   const api = useRef<Api | null>(null);
@@ -53,6 +53,39 @@ export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onE
   onPickRef.current = onPick;
   const selRef = useRef(sel);
   selRef.current = sel;
+  const onWallHRef = useRef(onWallH);
+  onWallHRef.current = onWallH;
+  const handle = useRef<HTMLDivElement>(null);
+  const placeRef = useRef<() => void>(() => {});
+  /** seçili duvarın üst orta noktasını ekrana yansıt, tutamacı oraya koy */
+  const wallTop = (H?: number) => {
+    const a = api.current, sl = selRef.current, h = handle.current, hs = host.current;
+    if (!a || !h || !hs || !sl || sl.k !== "wall") return null;
+    const f = fullRef.current;
+    const fl = f.floors[sl.floor];
+    const w = fl?.walls.find((q) => q.id === sl.id);
+    if (!w) return null;
+    const base = floorBases(f)[sl.floor];
+    const hh = H ?? w.h ?? fl.height;
+    const r = hs.getBoundingClientRect();
+    const proj = (y: number) => {
+      const v = new THREE.Vector3((w.a.x + w.b.x) / 2, base + y, (w.a.y + w.b.y) / 2).project(a.camera);
+      return { x: (v.x * 0.5 + 0.5) * r.width, y: (-v.y * 0.5 + 0.5) * r.height, z: v.z };
+    };
+    return { top: proj(hh), bot: proj(0), h: hh, floor: sl.floor, id: sl.id };
+  };
+  placeRef.current = () => {
+    const h = handle.current;
+    if (!h) return;
+    const t = wallTop();
+    if (!t || walk || t.top.z > 1) {
+      h.style.display = "none";
+      return;
+    }
+    h.style.display = "flex";
+    h.style.left = t.top.x + "px";
+    h.style.top = t.top.y + "px";
+  };
   const secPosRef = useRef(secPos);
   secPosRef.current = secPos;
   const secFlipRef = useRef(secFlip);
@@ -143,6 +176,7 @@ export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onE
       const hq = hqRef.current && !(moving || held.current.size > 0);
       renderLook(look, camera, hq);
       updCompass();
+      placeRef.current();
       if (!hq && hqRef.current) {
         clearTimeout(refineT);
         refineT = window.setTimeout(() => {
@@ -272,6 +306,7 @@ export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onE
       onPickRef.current(null);
     };
     const onDown = (e: PointerEvent) => {
+      if (e.button === 1) e.preventDefault();
       ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (ptrs.size === 1) tap = { x: e.clientX, y: e.clientY, t: performance.now(), ok: e.button === 0 || e.pointerType === "touch" };
       else if (tap) tap.ok = false;
@@ -333,6 +368,9 @@ export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onE
     dom.addEventListener("pointercancel", onUp);
     dom.addEventListener("wheel", onWheel, { passive: false });
     dom.addEventListener("contextmenu", noMenu);
+    const noMid = (e: MouseEvent) => { if (e.button === 1) e.preventDefault(); };
+    dom.addEventListener("mousedown", noMid);
+    dom.addEventListener("auxclick", noMid);
 
     const keyMap: Record<string, string> = { w: "f", arrowup: "f", s: "b", arrowdown: "b", a: "l", d: "r", q: "tl", arrowleft: "tl", e: "tr", arrowright: "tr" };
     const onKeyDown = (e: KeyboardEvent) => {
@@ -361,6 +399,8 @@ export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onE
       dom.removeEventListener("pointercancel", onUp);
       dom.removeEventListener("wheel", onWheel);
       dom.removeEventListener("contextmenu", noMenu);
+      dom.removeEventListener("mousedown", noMid);
+      dom.removeEventListener("auxclick", noMid);
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
       cancelAnimationFrame(raf.current);
@@ -407,7 +447,7 @@ export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onE
       const w = fl?.walls.find((q) => q.id === sel2.id);
       if (w) {
         const L = Math.hypot(w.b.x - w.a.x, w.b.y - w.a.y);
-        outline(new THREE.BoxGeometry(L, fl.height, w.t + 0.03), (w.a.x + w.b.x) / 2, bases[sel2.floor] + fl.height / 2, (w.a.y + w.b.y) / 2, -Math.atan2(w.b.y - w.a.y, w.b.x - w.a.x));
+        outline(new THREE.BoxGeometry(L, w.h ?? fl.height, w.t + 0.03), (w.a.x + w.b.x) / 2, bases[sel2.floor] + (w.h ?? fl.height) / 2, (w.a.y + w.b.y) / 2, -Math.atan2(w.b.y - w.a.y, w.b.x - w.a.x));
       }
     } else if (sel2.k === "item") {
       const it = f.floors[sel2.floor]?.items.find((q) => q.id === sel2.id);
@@ -458,6 +498,10 @@ export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onE
     a.render();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, fi, v3]);
+
+  useEffect(() => {
+    placeRef.current();
+  });
 
   /* ---------- kesit düzlemi: kaydırınca yeniden kurmadan güncelle ---------- */
   useEffect(() => {
@@ -607,6 +651,38 @@ export default function View3D({ full, fi, v3, name, walk, pan, sel, onPick, onE
         </button>
       </div>
       {photo && <Photo full={full} fi={fi} cam={photo.cam} inside={photo.inside} aspect={photo.aspect} name={name} onClose={() => setPhoto(null)} />}
+      <div
+        ref={handle}
+        className="h3handle"
+        style={{ display: "none" }}
+        title="Tutup yukarı / aşağı çek: duvar yüksekliği"
+        onPointerDown={(e) => {
+          const t = wallTop();
+          const a = api.current;
+          if (!t || !a) return;
+          e.preventDefault();
+          e.stopPropagation();
+          (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+          a.controls.enabled = false;
+          const y0 = e.clientY;
+          const h0 = t.h;
+          const pxPerM = Math.max(8, (t.bot.y - t.top.y) / Math.max(0.3, h0));
+          onWallHRef.current?.(t.floor, t.id, h0, "start");
+          const mv = (ev: PointerEvent) => {
+            const nh = Math.max(0.3, Math.min(8, Math.round((h0 + (y0 - ev.clientY) / pxPerM) * 20) / 20));
+            onWallHRef.current?.(t.floor, t.id, nh, "move");
+          };
+          const up = () => {
+            window.removeEventListener("pointermove", mv);
+            window.removeEventListener("pointerup", up);
+            window.removeEventListener("pointercancel", up);
+            a.controls.enabled = true;
+          };
+          window.addEventListener("pointermove", mv);
+          window.addEventListener("pointerup", up);
+          window.addEventListener("pointercancel", up);
+        }}
+      >↕</div>
       <div className="compass" aria-label="Kuzey yönü">
         <div ref={compass} className="needle">
           <span>K</span>

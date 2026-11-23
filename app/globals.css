@@ -273,3 +273,10 @@ button.ghost { border-color: transparent; background: transparent; font-size: 17
 @media (max-width: 640px) {
   .v3bar { flex-wrap: wrap; row-gap: 6px; }
 }
+
+.stagebox { background: #f1ead9; border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+.stagebox .stagename { font-weight: 700; font-size: 15px; color: #2f6b3a; }
+.stagebox input[type=range] { width: 100%; }
+.stagebox .row { display: flex; gap: 6px; flex-wrap: wrap; }
+
+.h3handle { position: absolute; z-index: 6; width: 44px; height: 44px; margin: -22px 0 0 -22px; border-radius: 50%; background: #ff8a1f; color: #fff; font-size: 22px; font-weight: 700; align-items: center; justify-content: center; border: 3px solid #fff; box-shadow: 0 2px 8px rgba(0,0,0,.4); cursor: ns-resize; touch-action: none; user-select: none; }

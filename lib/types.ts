@@ -33,6 +33,21 @@ export type Sun = { month: number; hour: number; lat: number; north: number; sha
 export type Env = { sun: Sun; objs: EnvObj[] };
 export const defaultEnv = (): Env => ({ sun: { month: 6, hour: 14, lat: 52, north: 0, shadows: true }, objs: [] });
 
+/** Yapısal direk (kolon): plan üzerinde, kat yüksekliğince */
+export type Col = { id: string; x: number; y: number };
+/** Temel, şap ve beton ayarları (inşaat aşamaları ve metraj için) */
+export type Build = {
+  foundation: "strip" | "raft" | "none"; // şerit temel | radye | yok
+  fDepth: number; // temel derinliği (m)
+  fWidth: number; // şerit temel genişliği (m)
+  screed: boolean; // zemin şapı
+  screedT: number; // şap kalınlığı (m)
+  slabT: number; // kat betonu kalınlığı (m)
+  topSlab: boolean; // en üst katın tavanına da beton at
+  autoCols: boolean; // köşelere ve duvar kesişimlerine otomatik direk
+  colSize: number; // direk kenarı (m)
+};
+export const defaultBuild = (): Build => ({ foundation: "strip", fDepth: 0.8, fWidth: 0.5, screed: true, screedT: 0.06, slabT: 0.2, topSlab: false, autoCols: true, colSize: 0.25 });
 export type Floor = {
   id: string;
   name: string;
@@ -42,9 +57,10 @@ export type Floor = {
   rooms: Room[];
   stairs: Stair[];
   items: Item[];
+  cols?: Col[];
 };
 export type Roof = {
-  kind: "gable" | "hip" | "shed" | "flat";
+  kind: "none" | "gable" | "hip" | "shed" | "flat"; // none = çatı yok (varsayılan)
   pitch: number; // derece
   overhang: number; // m
   ridge: "auto" | "x" | "y";
@@ -64,7 +80,7 @@ export type Finish = {
   baseTex?: string;
 };
 export const defaultFinish = (): Finish => ({ extColor: "#e9e1d3", extTex: "plain", intColor: "#f4f0e8", intTex: "plain", doorColor: "#8a5a36", frameColor: "#f7f7f4", groundColor: "#93b565" });
-export type FullData = { plot: Plot; snap: number; defT: number; roof: Roof; floors: Floor[]; custom: CatItem[]; fin: Finish; env: Env };
+export type FullData = { plot: Plot; snap: number; defT: number; roof: Roof; floors: Floor[]; custom: CatItem[]; fin: Finish; env: Env; build?: Build };
 
 /** Editörün o an çalıştığı kat + ortak ayarlar (düz görünüm) */
 export type PlanData = {
@@ -82,6 +98,8 @@ export type PlanData = {
   stairs: Stair[];
   items: Item[];
   custom: CatItem[];
+  cols: Col[];
+  build: Build;
 };
 
 export type Project = { id: string; name: string; createdAt: number; updatedAt: number; data: FullData; thumb?: string; lastSnap?: number; deletedAt?: number };
@@ -92,7 +110,7 @@ export const defaultRoof = (): Roof => ({ kind: "gable", pitch: 35, overhang: 0.
 export const newFloor = (name: string): Floor => ({ id: uid(), name, height: 2.8, walls: [], openings: [], rooms: [], stairs: [], items: [] });
 
 export function defaultFull(): FullData {
-  return { plot: { points: [], closed: false }, snap: 0.1, defT: 0.25, roof: defaultRoof(), floors: [newFloor("Zemin kat")], custom: [], fin: defaultFinish(), env: defaultEnv() };
+  return { plot: { points: [], closed: false }, snap: 0.1, defT: 0.25, roof: { ...defaultRoof(), kind: "none" }, floors: [newFloor("Zemin kat")], custom: [], fin: defaultFinish(), env: defaultEnv(), build: defaultBuild() };
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -109,6 +127,7 @@ export function normalizeFull(d: any): FullData {
       rooms: f.rooms ?? [],
       stairs: f.stairs ?? [],
       items: f.items ?? [],
+      cols: f.cols ?? [],
     }));
   } else {
     // v0.2 verisi: tek katlı düz yapı
@@ -123,6 +142,7 @@ export function normalizeFull(d: any): FullData {
     custom: Array.isArray(d.custom) ? d.custom : [],
     fin: { ...defaultFinish(), ...(d.fin ?? {}) },
     env: { sun: { ...defaultEnv().sun, ...(d.env?.sun ?? {}) }, objs: Array.isArray(d.env?.objs) ? d.env.objs : [] },
+    build: { ...defaultBuild(), ...(d.build ?? {}) },
   };
 }
 
@@ -143,12 +163,14 @@ export function flatten(f: FullData, i: number): PlanData {
     stairs: fl.stairs,
     items: fl.items,
     custom: f.custom,
+    cols: fl.cols ?? [],
+    build: f.build ?? defaultBuild(),
   };
 }
 
 export function unflatten(f: FullData, i: number, d: PlanData): FullData {
   const floors = f.floors.map((fl, k) =>
-    k === i ? { ...fl, name: d.name, height: d.height, walls: d.walls, openings: d.openings, rooms: d.rooms, stairs: d.stairs, items: d.items } : fl
+    k === i ? { ...fl, name: d.name, height: d.height, walls: d.walls, openings: d.openings, rooms: d.rooms, stairs: d.stairs, items: d.items, cols: d.cols } : fl
   );
-  return { plot: d.plot, snap: d.snap, defT: d.defT, roof: d.roof, floors, custom: d.custom, fin: d.fin, env: d.env };
+  return { plot: d.plot, snap: d.snap, defT: d.defT, roof: d.roof, floors, custom: d.custom, fin: d.fin, env: d.env, build: d.build };
 }

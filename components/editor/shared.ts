@@ -2,7 +2,7 @@ import type { FullData, Pt } from "@/lib/types";
 
 export type View = { s: number; ox: number; oy: number };
 export type Saved = "saved" | "saving" | "error";
-export type Tool = "select" | "plot" | "wall" | "door" | "window" | "room" | "furn" | "env" | "stair" | "roof";
+export type Tool = "select" | "plot" | "wall" | "door" | "window" | "room" | "furn" | "env" | "stair" | "roof" | "build";
 export type Sel =
   | null
   | { k: "pv"; i: number }
@@ -28,6 +28,7 @@ export const TOOL_HINT: Record<Tool, string> = {
   env: "Listeden ağaç, yol, komşu bina gibi bir nesne seç, sonra arsada yerleştireceğin noktaya dokun.",
   furn: "Listeden bir eşya seç, sonra odada yerleştireceğin noktaya dokun.",
   stair: "Merdivenin yerleşeceği noktaya dokun. Basamak sayısı kat yüksekliğinden hesaplanır.",
+  build: "Direk koymak için plana dokun; elle koyduğun direğe tekrar dokunursan silinir. Temel, şap ve beton ayarları sağ panelde.",
   roof: "Çatı türünü ve eğimini panelden ayarla. Taslak, en üst katın dış sınırına göre çizilir.",
 };
 

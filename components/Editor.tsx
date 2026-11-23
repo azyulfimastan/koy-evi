@@ -1,8 +1,9 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CatItem, FullData, Item, Opening, PlanData, Pt, Room, Stair, Wall } from "@/lib/types";
-import { flatten, newFloor, normalizeFull, uid, unflatten, defaultFull } from "@/lib/types";
+import { flatten, newFloor, normalizeFull, uid, unflatten, defaultFull, defaultBuild } from "@/lib/types";
 import { roofInfo, ATTIC_MIN } from "@/lib/roof";
+import { buildStages, floorCols } from "@/lib/stages";
 import { stairBox, stairLocal, stairSteps } from "@/lib/stairs";
 import { CATALOG, CATS, itemLocal } from "@/lib/furniture";
 import { area, bounds, dist, fmt, perimeter, round3, setEdgeLength, snapTo, segProject } from "@/lib/geo";
@@ -777,6 +778,18 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
       return;
     }
 
+    if (t === "build") {
+      drag.current = pan(() => {
+        const cur = dataRef.current;
+        const pos = sn(toWorld(p.x, p.y));
+        const list = cur.cols ?? [];
+        const ex = list.find((c) => Math.hypot(c.x - pos.x, c.y - pos.y) < 0.3);
+        if (ex) apply({ ...cur, cols: list.filter((c) => c.id !== ex.id) });
+        else apply({ ...cur, cols: [...list, { id: uid(), x: pos.x, y: pos.y }] });
+      });
+      return;
+    }
+
     if (t === "stair") {
       drag.current = pan(() => {
         const cur = dataRef.current;
@@ -898,7 +911,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
       if (t === "wall") setHover(snapWall(wpt, chainRef.current));
       else if (t === "plot" && !dataRef.current.plot.closed) setHover(sn(wpt));
       else if (t === "door" || t === "window") setHover(wpt);
-      else if (t === "stair" || t === "furn" || t === "env") setHover(sn(wpt));
+      else if (t === "stair" || t === "furn" || t === "env" || t === "build") setHover(sn(wpt));
     };
     if (!d) {
       updateHover();
@@ -1147,6 +1160,16 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
   /** Güneş ayarı: geri alma listesine yazılmaz */
   const setSun = (p: Partial<typeof env.sun>) => setFull({ ...fullRef.current, env: { ...fullRef.current.env, sun: { ...fullRef.current.env.sun, ...p } } });
   /** Başka bir kattaki öğeyi de değiştirebilen genel düzenleme (3D'de seçilenler için) */
+  const onWallH = (floor: number, id: string, h: number, phase: "start" | "move") => {
+    const f = fullRef.current;
+    if (phase === "start") {
+      commit(f);
+      return;
+    }
+    const nf = cloneF(f);
+    nf.floors = nf.floors.map((fl, i) => (i === floor ? { ...fl, walls: fl.walls.map((q) => (q.id === id ? { ...q, h } : q)) } : fl));
+    setFull(nf);
+  };
   const edit3d = (fn: (f: FullData) => FullData) => {
     const f = fullRef.current;
     commit(f);
@@ -1268,6 +1291,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
     ["furn", "Eşya"],
     ["env", "Çevre"],
     ["stair", "Merdiven"],
+    ["build", "Yapı"],
     ["roof", "Çatı"],
   ];
 
@@ -1357,7 +1381,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
       )}
       {showRep && <Report full={full} name={name} onClose={() => setShowRep(false)} />}
       <div className="stage">
-        {is3d && <View3D full={full} fi={fi} v3={v3eff} name={name} walk={walk} pan={pan3} sel={pick3} onPick={setPick3} onExit={() => setWalk(null)} secPos={secPos} secFlip={secFlip} cmd={cmd3} />}
+        {is3d && <View3D full={full} fi={fi} v3={v3eff} name={name} walk={walk} pan={pan3} sel={pick3} onPick={setPick3} onExit={() => setWalk(null)} onWallH={onWallH} secPos={secPos} secFlip={secFlip} cmd={cmd3} />}
         <div className="cv" ref={wrap} style={is3d ? { display: "none" } : undefined}>
           <canvas
             ref={cv}
@@ -1545,6 +1569,26 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
                     </>
                   );
                 })()}
+                <h4>🏗️ İnşaat aşamaları</h4>
+                {(() => {
+                  const stages = buildStages(full);
+                  const last = stages.length - 1;
+                  const si = v3.stage === undefined ? last : Math.min(v3.stage, last);
+                  const go = (n: number) => setV3({ ...v3, stage: n >= last ? undefined : Math.max(0, n), sec: "none", floors: "all", roof: true });
+                  return (
+                    <div className="stagebox">
+                      <div className="muted small">{si + 1} / {stages.length}</div>
+                      <div className="stagename">{stages[si].label}</div>
+                      <input type="range" min={0} max={last} value={si} aria-label="İnşaat aşaması" onChange={(e) => go(+e.target.value)} />
+                      <div className="row">
+                        <button onClick={() => go(si - 1)} disabled={si <= 0}>◀ Geri</button>
+                        <button onClick={() => go(si + 1)} disabled={si >= last}>İleri ▶</button>
+                        {si < last && <button onClick={() => go(last)}>Tamamlandı</button>}
+                      </div>
+                      <div className="muted small">Kazı, temel, şap, direk, duvar, kapı-pencere ve betonu sırayla gör. Ayarlar: Yapı aracı.</div>
+                    </div>
+                  );
+                })()}
                 <h4>Güneş ve gölge</h4>
                 {(() => {
                   const sp = sunPos(env.sun);
@@ -1589,7 +1633,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
                         <option value="only">Yalnız {full.floors[fi]?.name}</option>
                       </select>
                     </label>
-                    <label className="chk"><input type="checkbox" checked={v3.roof} disabled={v3.sec === "h"} onChange={(e) => setV3({ ...v3, roof: e.target.checked })} /> Çatıyı göster{v3.sec === "h" ? " (yatay kesitte gizli)" : ""}</label>
+                    <label className="chk"><input type="checkbox" checked={v3.roof} disabled={v3.sec === "h" || full.roof.kind === "none"} onChange={(e) => setV3({ ...v3, roof: e.target.checked })} /> Çatıyı göster{full.roof.kind === "none" ? " (çatı eklenmedi)" : v3.sec === "h" ? " (yatay kesitte gizli)" : ""}</label>
                     <label className="chk"><input type="checkbox" checked={v3.items} onChange={(e) => setV3({ ...v3, items: e.target.checked })} /> Eşyaları göster</label>
                     <label className="chk"><input type="checkbox" checked={pan3} onChange={(e) => setPan3(e.target.checked)} /> Tek parmakla kaydır (telefon)</label>
                     <div className="stats">
@@ -1948,6 +1992,48 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
               </>
             )}
 
+            {/* --- Yapı: temel, şap, beton, direk --- */}
+            {tool === "build" && (() => {
+              const b = full.build ?? defaultBuild();
+              const setB = (patch: Partial<typeof b>) => apply({ ...data, build: { ...b, ...patch } });
+              const manual = (data.cols ?? []).length;
+              const total = floorCols(full, fi).length;
+              return (
+                <>
+                  <h3>Yapı: temel, şap, beton, direk</h3>
+                  <div className="muted small">Burada yaptığın ayarlar 3D'deki <b>🏗️ İnşaat aşamaları</b>nda ve metrajda kullanılır.</div>
+                  <h4>Temel</h4>
+                  <label className="edge">
+                    <span>Temel türü</span>
+                    <select value={b.foundation} onChange={(e) => setB({ foundation: e.target.value as typeof b.foundation })}>
+                      <option value="strip">Şerit temel (duvar altı)</option>
+                      <option value="raft">Radye (tüm zemin)</option>
+                      <option value="none">Temel yok</option>
+                    </select>
+                  </label>
+                  {b.foundation === "strip" && (
+                    <>
+                      <NumField key={"fd" + b.fDepth} label="Temel derinliği (cm)" value={b.fDepth * 100} decimals={0} onCommit={(v) => setB({ fDepth: round3(Math.max(0.3, Math.min(2.5, v / 100))) })} />
+                      <NumField key={"fw" + b.fWidth} label="Temel genişliği (cm)" value={b.fWidth * 100} decimals={0} onCommit={(v) => setB({ fWidth: round3(Math.max(0.3, Math.min(1.5, v / 100))) })} />
+                    </>
+                  )}
+                  <h4>Zemin ve katlar</h4>
+                  <label className="chk"><input type="checkbox" checked={b.screed} onChange={(e) => setB({ screed: e.target.checked })} /> Zemin betonu ve şap</label>
+                  <NumField key={"sl" + b.slabT} label="Kat betonu kalınlığı (cm)" value={b.slabT * 100} decimals={0} onCommit={(v) => setB({ slabT: round3(Math.max(0.1, Math.min(0.4, v / 100))) })} />
+                  <label className="chk"><input type="checkbox" checked={b.topSlab} onChange={(e) => setB({ topSlab: e.target.checked })} /> En üst kata da tavan betonu at</label>
+                  <h4>Direkler (kolonlar)</h4>
+                  <label className="chk"><input type="checkbox" checked={b.autoCols} onChange={(e) => setB({ autoCols: e.target.checked })} /> Köşelere ve uzun duvarlara otomatik direk</label>
+                  <NumField key={"cs" + b.colSize} label="Direk kenarı (cm)" value={b.colSize * 100} decimals={0} onCommit={(v) => setB({ colSize: round3(Math.max(0.15, Math.min(0.6, v / 100))) })} />
+                  <div className="stats">
+                    <div><span>Bu katta direk</span><b>{total}</b></div>
+                    <div><span>Elle koyduğun</span><b>{manual}</b></div>
+                  </div>
+                  {manual > 0 && <button onClick={() => apply({ ...data, cols: [] })}>Elle koyduğum direkleri sil</button>}
+                  <div className="muted small">Mavi kare: elle koyduğun, gri kare: otomatik. Plana dokunarak direk ekle; elle koyduğuna tekrar dokunursan silinir.</div>
+                </>
+              );
+            })()}
+
             {/* --- Çatı --- */}
             {tool === "roof" && (
               <>
@@ -1955,12 +2041,16 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
                 <label className="edge">
                   <span>Tür</span>
                   <select value={full.roof.kind} onChange={(e) => apply({ ...data, roof: { ...full.roof, kind: e.target.value as FullData["roof"]["kind"] } })}>
+                    <option value="none">Çatı yok (3D'de çatı görünmez)</option>
                     <option value="gable">Beşik (iki yöne eğimli)</option>
                     <option value="hip">Kırma (dört yöne eğimli)</option>
                     <option value="shed">Tek eğimli</option>
                     <option value="flat">Düz</option>
                   </select>
                 </label>
+                {full.roof.kind === "none" && <div className="muted small">Çatı eklenmedi. 3D görünümde ev çatısız görünür. Çatı istersen yukarıdan bir tür seç.</div>}
+                {full.roof.kind !== "none" && (
+                  <>
                 {full.roof.kind !== "flat" && (
                   <NumField key={"pitch" + full.roof.pitch} label="Eğim (derece)" value={full.roof.pitch} decimals={0}
                     onCommit={(v) => apply({ ...data, roof: { ...full.roof, pitch: Math.max(5, Math.min(70, Math.round(v))) } })} />
@@ -2000,11 +2090,13 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
                     </>
                   );
                 })()}
+                  </>
+                )}
               </>
             )}
 
             {/* --- Genel --- */}
-            {tool !== "plot" && tool !== "roof" && tool !== "furn" && tool !== "env" && !selWall && !selOp && !selRoom && !selStair && !selItem && !selEnv && (
+            {tool !== "plot" && tool !== "roof" && tool !== "build" && tool !== "furn" && tool !== "env" && !selWall && !selOp && !selRoom && !selStair && !selItem && !selEnv && (
               <>
                 <h3>{data.name}</h3>
                 <label className="edge">

@@ -15,6 +15,7 @@ export type RoofInfo = {
 export const ATTIC_MIN = 1.8;
 
 export function roofInfo(f: FullData): RoofInfo | null {
+  if (f.roof.kind === "none") return null;
   let topIdx = -1;
   f.floors.forEach((fl, i) => {
     if (fl.walls.length) topIdx = i;

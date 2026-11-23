@@ -3,6 +3,8 @@ import { area, fmt } from "./geo";
 import { rasterize, regionAt } from "./rooms";
 import { outsideFn, outsideMask } from "./scene3d";
 import { roofInfo } from "./roof";
+import { floorCols } from "./stages";
+import { defaultBuild } from "./types";
 import { EXT_TEX, FLOOR_TEX, INT_TEX, ROOF_TEX } from "./textures";
 
 export type RoomRow = { floor: string; name: string; area: number };
@@ -49,6 +51,10 @@ export function computeReport(f: FullData): Report {
     switches = 0,
     wet = 0,
     rads = 0;
+  const bld = f.build ?? defaultBuild();
+  let colCount = 0,
+    colVol = 0,
+    firstArea = 0;
   const WET = new Set(["sinkK", "basin", "vanity", "wc", "tub", "shower", "washer", "dish", "cooker"]);
 
   f.floors.forEach((fl, fi) => {
@@ -108,8 +114,14 @@ export function computeReport(f: FullData): Report {
         for (let k = 0; k < out.length; k++) if (!out[k]) n++;
         const a = n * ras.cell * ras.cell;
         slabArea += a;
-        slabVol += a * 0.15;
+        slabVol += a * bld.slabT;
+        if (fi === 0) firstArea = a;
       }
+    }
+    if (fl.walls.length) {
+      const cs = floorCols(f, fi);
+      colCount += cs.length;
+      colVol += cs.length * bld.colSize * bld.colSize * fl.height;
     }
     lintel += fl.openings.reduce((sum, o) => sum + o.w + 0.4, 0);
     for (const it of fl.items) {
@@ -145,10 +157,18 @@ export function computeReport(f: FullData): Report {
 
   const rough: Line[] = [];
   const ar = (name: string, qty: number, unit: string, note?: string) => qty > 0.004 && rough.push({ name, qty: r2(qty), unit, note });
-  const fw = Math.max(0.5, (f.floors[0]?.walls[0]?.t ?? 0.25) + 0.3);
-  ar("Temel (şerit) betonu", foundLen * fw * 0.8, "m³", `${fmt(foundLen)} m × ${fmt(fw)} m genişlik × 0,80 m derinlik varsayımı`);
-  ar("Grobeton (temel altı, 10 cm)", foundLen * fw * 0.1, "m³");
-  ar("Zemin/ara döşeme betonu (15 cm)", slabVol, "m³", `${fmt(slabArea)} m² döşeme alanı`);
+  if (bld.foundation === "strip") {
+    ar("Temel hendeği kazısı", foundLen * (bld.fWidth + 0.6) * bld.fDepth, "m³", `${fmt(foundLen)} m × ${fmt(bld.fWidth + 0.6)} m × ${fmt(bld.fDepth)} m`);
+    ar("Temel (şerit) betonu", foundLen * bld.fWidth * bld.fDepth, "m³", `${fmt(foundLen)} m × ${fmt(bld.fWidth)} m genişlik × ${fmt(bld.fDepth)} m derinlik`);
+    ar("Grobeton (temel altı, 10 cm)", foundLen * bld.fWidth * 0.1, "m³");
+  } else if (bld.foundation === "raft") {
+    ar("Radye temel kazısı", (firstArea + foundLen * 0.9) * 0.5, "m³");
+    ar("Radye temel betonu (40 cm)", (firstArea + foundLen * 0.9) * 0.4, "m³");
+  }
+  if (bld.screed) ar("Zemin şapı", firstArea * bld.screedT, "m³", `${fmt(firstArea)} m² × ${Math.round(bld.screedT * 100)} cm`);
+  ar(`Zemin/ara döşeme betonu (${Math.round(bld.slabT * 100)} cm)`, slabVol, "m³", `${fmt(slabArea)} m² döşeme alanı`);
+  ar("Direk (kolon) adedi", colCount, "adet", `${Math.round(bld.colSize * 100)} × ${Math.round(bld.colSize * 100)} cm`);
+  ar("Direk betonu", colVol, "m³");
   ar("Hatıl betonu (her katta duvar üstü)", beamVol, "m³", "20 cm yükseklik varsayımı");
   ar("Lento (kapı/pencere üstü) toplam boy", lintel, "m");
   ar("Elektrik: priz", sockets, "adet", "oda alanına göre tahmini");

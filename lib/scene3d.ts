@@ -6,6 +6,8 @@ import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeom
 import { inRegion, rasterize, regionAt, wallGeom } from "./rooms";
 import { roofInfo } from "./roof";
 import { stairBox, stairLocal, stairSteps, TREAD } from "./stairs";
+import { buildStages, floorCols, reached } from "./stages";
+import { defaultBuild } from "./types";
 
 /** 3B görünüm ayarları */
 export type V3 = {
@@ -16,6 +18,8 @@ export type V3 = {
   sec: "none" | "h" | "x" | "z";
   /** eski sabit kesit (yalnızca iç kullanım) */
   cut?: boolean;
+  /** inşaat aşaması (buildStages dizini); yoksa bitmiş ev */
+  stage?: number;
 };
 
 /** Kesit düzlemini ayarla: düzlemin "korunan" tarafı görünür kalır */
@@ -91,6 +95,8 @@ function makeMats(clip: THREE.Plane[], fin: Finish) {
     wallSide: std("#ffffff", { vertexColors: true, side }),
     frame: std(fin.frameColor, { roughness: 0.45 }),
     slab: std("#ebe6dd", { roughness: 0.95 }),
+    concrete: std("#a3a19b", { roughness: 0.97 }),
+    soil: new THREE.MeshStandardMaterial({ color: "#5a4230", roughness: 1 }),
     floorTop: std("#cdb894"),
     cap: new THREE.MeshStandardMaterial({ color: CUT_CAP, roughness: 1 }),
     glass: new THREE.MeshStandardMaterial({ color: "#a9c6d6", roughness: 0.04, metalness: 0.15, transparent: true, opacity: 0.32, depthWrite: false, side: THREE.DoubleSide, clippingPlanes: clip, envMapIntensity: 2.2 }),
@@ -270,7 +276,7 @@ function wallExt(walls: Floor["walls"]) {
   return m;
 }
 
-function buildWalls(fl: Floor, base: number, m: Mats, cut: boolean, g: THREE.Group, level = 0) {
+function buildWalls(fl: Floor, base: number, m: Mats, cut: boolean, g: THREE.Group, level = 0, fit = true) {
   const exts = wallExt(fl.walls);
   const FH = fl.height;
   const isOut = outsideFn(fl);
@@ -501,21 +507,23 @@ function buildWalls(fl: Floor, base: number, m: Mats, cut: boolean, g: THREE.Gro
     mesh.receiveShadow = !cut;
     g.add(mesh);
   }
-  const gm = add(glassGeoms, m.glass, false);
-  if (gm) gm.userData.glass = true;
-  add(doorGeoms, m.door, !cut);
+  if (fit) {
+    const gm = add(glassGeoms, m.glass, false);
+    if (gm) gm.userData.glass = true;
+    add(doorGeoms, m.door, !cut);
+    add(frameGeoms, m.frame, !cut);
+    add(sillGeoms, m.sill, !cut);
+    add(panelGeoms, m.doorPanel, !cut);
+    add(metalGeoms, m.metal, false);
+  }
   add(capGeoms, m.cap, false);
-  add(frameGeoms, m.frame, !cut);
-  add(sillGeoms, m.sill, !cut);
   add(plinthGeoms, m.plinth, true);
   add(bandGeoms, m.band, true);
   add(paveGeoms, m.pave, true);
-  add(panelGeoms, m.doorPanel, !cut);
-  add(metalGeoms, m.metal, false);
 }
 
 /* ---------------- döşeme ---------------- */
-function buildSlab(fl: Floor, below: Floor | null, base: number, m: Mats, g: THREE.Group) {
+function buildSlab(fl: Floor, below: Floor | null, base: number, m: Mats, g: THREE.Group, matOverride?: THREE.Material, T = SLAB) {
   const r = rasterize(fl.walls);
   if (!r) return;
   const { w: W, h: H, cell, blocked } = r;
@@ -569,16 +577,74 @@ function buildSlab(fl: Floor, below: Floor | null, base: number, m: Mats, g: THR
     const x1 = r.x0 + rc.i1 * cell;
     const y0 = r.y0 + rc.j0 * cell;
     const y1 = r.y0 + rc.j1 * cell;
-    const bg = new THREE.BoxGeometry(x1 - x0, SLAB, y1 - y0);
-    bg.translate((x0 + x1) / 2, base - SLAB / 2, (y0 + y1) / 2);
+    const bg = new THREE.BoxGeometry(x1 - x0, T, y1 - y0);
+    bg.translate((x0 + x1) / 2, base - T / 2, (y0 + y1) / 2);
     return ni(bg);
   });
   const merged = mergeGeometries(geos.map(ni));
   geos.forEach((q2) => q2.dispose());
   if (!merged) return;
-  const mesh = new THREE.Mesh(merged, base > 0.01 ? m.slab : m.floorTop);
+  const mesh = new THREE.Mesh(merged, matOverride ?? (base > 0.01 ? m.slab : m.floorTop));
   mesh.receiveShadow = true;
   mesh.castShadow = true;
+  g.add(mesh);
+}
+
+/* ---------------- yapı: direk ve temel ---------------- */
+function buildCols(f: FullData, fi: number, base: number, m: Mats, g: THREE.Group) {
+  const b = f.build ?? defaultBuild();
+  const H = f.floors[fi].height;
+  const cs = floorCols(f, fi);
+  if (!cs.length) return;
+  const geos = cs.map((c) => {
+    const bg = new THREE.BoxGeometry(b.colSize, H, b.colSize);
+    bg.translate(c.x, base + H / 2, c.y);
+    return ni(bg);
+  });
+  const merged = mergeGeometries(geos);
+  geos.forEach((q) => q.dispose());
+  if (!merged) return;
+  const mesh = new THREE.Mesh(merged, m.concrete);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  g.add(mesh);
+}
+
+/** Temel: "dig" = hendek (koyu toprak), "found" = beton (zeminin altında) */
+function buildFoundation(f: FullData, fi: number, mode: "dig" | "found", m: Mats, g: THREE.Group) {
+  const b = f.build ?? defaultBuild();
+  const fl = f.floors[fi];
+  if (b.foundation === "none" || !fl.walls.length) return;
+  const geos: THREE.BufferGeometry[] = [];
+  if (b.foundation === "raft") {
+    const xs = fl.walls.flatMap((w) => [w.a.x, w.b.x]);
+    const ys = fl.walls.flatMap((w) => [w.a.y, w.b.y]);
+    const x0 = Math.min(...xs) - 0.45;
+    const x1 = Math.max(...xs) + 0.45;
+    const y0 = Math.min(...ys) - 0.45;
+    const y1 = Math.max(...ys) + 0.45;
+    const h = mode === "dig" ? 0.02 : 0.4;
+    const bg = new THREE.BoxGeometry(x1 - x0 + (mode === "dig" ? 0.6 : 0), h, y1 - y0 + (mode === "dig" ? 0.6 : 0));
+    bg.translate((x0 + x1) / 2, mode === "dig" ? 0.012 : -0.2, (y0 + y1) / 2);
+    geos.push(ni(bg));
+  } else {
+    for (const w of fl.walls) {
+      const dx = w.b.x - w.a.x;
+      const dy = w.b.y - w.a.y;
+      const L = Math.hypot(dx, dy);
+      if (L < 0.05) continue;
+      const fw = b.fWidth + (mode === "dig" ? 0.6 : 0);
+      const bg = new THREE.BoxGeometry(L + fw, mode === "dig" ? 0.02 : b.fDepth, fw);
+      bg.rotateY(-Math.atan2(dy, dx));
+      bg.translate((w.a.x + w.b.x) / 2, mode === "dig" ? 0.012 : -b.fDepth / 2, (w.a.y + w.b.y) / 2);
+      geos.push(ni(bg));
+    }
+  }
+  const merged = geos.length ? mergeGeometries(geos) : null;
+  geos.forEach((q) => q.dispose());
+  if (!merged) return;
+  const mesh = new THREE.Mesh(merged, mode === "dig" ? m.soil : m.concrete);
+  mesh.receiveShadow = true;
   g.add(mesh);
 }
 
@@ -1585,22 +1651,49 @@ export function buildHouse(f: FullData, fi: number, v: V3, secPlane?: THREE.Plan
   const cutPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), bases[topShown] + CUT_H);
   const plain = makeMats([], f.fin);
   const clipped = makeMats([cutPlane], f.fin);
+  const bld = f.build ?? defaultBuild();
+  let topWalls = -1;
+  let firstWalls = -1;
+  f.floors.forEach((fl, i) => {
+    if (fl.walls.length) {
+      topWalls = i;
+      if (firstWalls < 0) firstWalls = i;
+    }
+  });
+  const stages = v.stage !== undefined ? buildStages(f) : null;
+  const si = stages ? Math.min(Math.max(0, v.stage ?? 0), stages.length - 1) : -1;
+  const staged = !!stages && si < stages.length - 1;
+  const R = (key: Parameters<typeof reached>[2], fl?: number) => !staged || reached(stages!, si, key, fl);
+  if (staged && firstWalls >= 0) {
+    const sg = new THREE.Group();
+    sg.userData = { floor: 0 };
+    house.add(sg);
+    if (R("dig") && !R("found")) buildFoundation(f, firstWalls, "dig", plain, sg);
+    if (R("found")) buildFoundation(f, firstWalls, "found", plain, sg);
+    if (R("screed")) buildSlab(f.floors[firstWalls], null, 0, plain, sg, plain.concrete, bld.slabT);
+  }
   for (let i = lo; i <= hi; i++) {
     const fl = f.floors[i];
     const fg = new THREE.Group();
     fg.userData = { floor: i };
     house.add(fg);
     const m = v.cut && i === topShown ? clipped : plain;
-    buildSlab(fl, i > 0 ? f.floors[i - 1] : null, bases[i], plain, fg);
+    if (staged) {
+      if (!fl.walls.length) continue;
+      if (R("cols", i) && !R("walls", i)) buildCols(f, i, bases[i], plain, fg);
+      if (R("walls", i)) buildWalls(fl, bases[i], m, false, fg, i, R("fit", i));
+      if (R("slab", i)) buildSlab(fl, fl, bases[i] + fl.height, plain, fg, plain.concrete, bld.slabT);
+      continue;
+    }
+    buildSlab(fl, i > 0 ? f.floors[i - 1] : null, bases[i], plain, fg, undefined, bld.slabT);
     buildRoomFloors(fl, i > 0 ? f.floors[i - 1] : null, bases[i], m.clip, fg);
     buildWalls(fl, bases[i], m, !!v.cut && i === topShown, fg, i);
     for (const st of fl.stairs) buildStair(st, fl.height, bases[i], m, fg);
     if (v.items) for (const it of fl.items) buildItem(it, bases[i], m, fg);
+    if (bld.topSlab && i === topWalls && !v.cut) buildSlab(fl, fl, bases[i] + fl.height, plain, fg, undefined, bld.slabT);
   }
   // çatı: yalnızca en üst katlar gösteriliyorsa ve kesit kapalıysa
-  let topWalls = -1;
-  f.floors.forEach((fl, i) => fl.walls.length && (topWalls = i));
-  const roofShown = v.roof && !v.cut && v.sec !== "h" && topWalls >= 0 && hi >= topWalls && lo <= topWalls;
+  const roofShown = v.roof && f.roof.kind !== "none" && R("roof") && !v.cut && v.sec !== "h" && topWalls >= 0 && hi >= topWalls && lo <= topWalls;
   if (roofShown) {
     const rg = new THREE.Group();
     rg.userData = { floor: topWalls };
@@ -1609,6 +1702,17 @@ export function buildHouse(f: FullData, fi: number, v: V3, secPlane?: THREE.Plan
   }
   if (v.sec !== "none" && secPlane) applySection(house, secPlane);
   buildGround(f, ground);
+  if (staged && firstWalls >= 0 && R("dig") && !R("cols", firstWalls)) {
+    // temel aşamalarında zemini yarı saydam yap: toprağın altındaki beton görünsün
+    const gm0 = ground.children[0] as THREE.Mesh | undefined;
+    if (gm0 && gm0.isMesh) {
+      const mt = (gm0.material as THREE.Material).clone();
+      mt.transparent = true;
+      mt.opacity = 0.42;
+      mt.depthWrite = false;
+      gm0.material = mt;
+    }
+  }
   buildEnv(f.env.objs, env);
   return { house, ground, env, roofShown, cutPlane };
 }
@@ -1643,5 +1747,5 @@ export function totalHeight(f: FullData) {
   if (topWalls < 0) return 0;
   const ri = roofInfo(f);
   const wallTop = bases[topWalls] + f.floors[topWalls].height;
-  return wallTop + (ri && f.roof.kind !== "flat" ? ri.ridgeHeight : 0.25);
+  return wallTop + (f.roof.kind === "none" ? 0 : ri && f.roof.kind !== "flat" ? ri.ridgeHeight : 0.25);
 }
