@@ -5,7 +5,7 @@ import { buildHouse, disposeTree, setNight } from "./scene3d";
 import { applyLookSun, disposeLook, renderLook, setupLook } from "./look";
 import { rasterize, regionAt, wallGeom, endJoins } from "./rooms";
 import { drawItem } from "./furniture";
-import { drawStair } from "./stairs";
+import { drawStair, stairRise } from "./stairs";
 import { fmt, bounds } from "./geo";
 import { fillMaskWithPattern, floorColor, texPattern } from "./plan2d";
 
@@ -190,7 +190,7 @@ export function renderPlan(f: FullData, fi: number, w = 1080, h = 1000): HTMLCan
     g.lineTo(X(cx + u.x * hw), Y(cy + u.y * hw));
     g.stroke();
   }
-  for (const st of fl.stairs) drawStair(g, st, fl.height, s, ox, oy, { color: "#6d6155", fill: "#e8dcc4", lw: 1.5 });
+  for (const st of fl.stairs) drawStair(g, st, stairRise(f, fi, st), s, ox, oy, { color: "#6d6155", fill: "#e8dcc4", lw: 1.5 });
   for (const it of fl.items) drawItem(g, it, s, ox, oy, { label: false });
   // duvar ölçüleri
   {

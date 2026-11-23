@@ -115,6 +115,16 @@ export default function Wizard({ onClose, onCreated }: { onClose: () => void; on
                 {[1, 2, 3].map((n) => <button key={n} className={s.floors === n ? "on" : ""} onClick={() => setFloors(n)}>{n} kat</button>)}
               </div>
               <Num label="Kat yüksekliği (m)" v={s.height} on={(n) => upd({ height: n })} min={2.3} max={4} step={0.1} />
+              <h3>Ev zeminden yüksekte mi? (kaide)</h3>
+              <Num label="Zeminden yükseklik (cm)" v={Math.round(s.plinth * 100)} on={(n) => upd({ plinth: n / 100 })} min={0} max={250} step={10} />
+              {s.plinth > 0.3 && <label className="wchk"><input type="checkbox" checked={s.entryStair} onChange={(e) => upd({ entryStair: e.target.checked })} /> Girişe dış merdiven koy</label>}
+              {s.floors > 1 && (
+                <>
+                  <h3>Katlar arası merdiven</h3>
+                  <label className="wchk"><input type="checkbox" checked={s.innerStair} onChange={(e) => upd({ innerStair: e.target.checked })} /> İç merdiven (hol içinde)</label>
+                  <label className="wchk"><input type="checkbox" checked={s.upperExt} onChange={(e) => upd({ upperExt: e.target.checked })} /> 1. kata dış merdiven (sağ cephe)</label>
+                </>
+              )}
             </section>
           )}
 

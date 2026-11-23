@@ -1,6 +1,6 @@
 import type { FullData } from "./types";
 import { balconyRect } from "./balcony";
-import { stairBox } from "./stairs";
+import { stairBox, stairRise } from "./stairs";
 
 /** Bir katın sade plan çizimi (SVG metni): karşılaştırma ve özet sayfaları için */
 export function planSvg(f: FullData, fi: number, W = 520, H = 380): string {
@@ -11,7 +11,8 @@ export function planSvg(f: FullData, fi: number, W = 520, H = 380): string {
     const w = fl.walls.find((q) => q.id === b.wall);
     return w ? balconyRect(w, b).pts : [];
   });
-  const all = [...pts, ...bal];
+  const stp = fl.stairs.filter((q) => q.ext).flatMap((q) => { const d = stairBox(q, stairRise(f, fi, q)).D / 2; return [{ x: q.x - d, y: q.y - d }, { x: q.x + d, y: q.y + d }]; });
+  const all = [...pts, ...bal, ...stp];
   const minX = Math.min(...all.map((p) => p.x)), maxX = Math.max(...all.map((p) => p.x));
   const minY = Math.min(...all.map((p) => p.y)), maxY = Math.max(...all.map((p) => p.y));
   const pad = 24;
@@ -37,7 +38,7 @@ export function planSvg(f: FullData, fi: number, W = 520, H = 380): string {
     out.push(`<line x1="${X(a.x)}" y1="${Y(a.y)}" x2="${X(b.x)}" y2="${Y(b.y)}" stroke="${o.kind === "window" ? "#4a90c8" : "#a0623a"}" stroke-width="2"/>`);
   }
   for (const st of fl.stairs) {
-    const bx = stairBox(st, fl.height);
+    const bx = stairBox(st, stairRise(f, fi, st));
     out.push(`<rect x="${(+X(st.x) - (bx.W * s) / 2).toFixed(1)}" y="${(+Y(st.y) - (bx.D * s) / 2).toFixed(1)}" width="${(bx.W * s).toFixed(1)}" height="${(bx.D * s).toFixed(1)}" fill="none" stroke="#7a7266" stroke-width="1.2" stroke-dasharray="3 2" transform="rotate(${st.rot} ${X(st.x)} ${Y(st.y)})"/>`);
   }
   for (const r of fl.rooms) out.push(`<text x="${X(r.seed.x)}" y="${Y(r.seed.y)}" text-anchor="middle" font-size="${Math.max(9, Math.min(13, s * 0.4)).toFixed(0)}" font-family="sans-serif" fill="#2a2a26" paint-order="stroke" stroke="#fffdf6" stroke-width="3">${r.name.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</text>`);

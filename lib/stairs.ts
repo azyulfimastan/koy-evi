@@ -1,4 +1,15 @@
-import type { Stair } from "./types";
+import type { FullData, Stair } from "./types";
+
+/** dış merdivenin üstündeki sahanlık derinliği (m) */
+export const LAND = 1.0;
+
+/** Merdivenin çıktığı yükseklik: iç merdiven kat yüksekliği, dış merdiven zeminden bu katın döşemesine kadar */
+export function stairRise(f: Pick<FullData, "floors" | "build">, fi: number, st: Stair) {
+  if (!st.ext) return f.floors[fi]?.height ?? 2.8;
+  let h = f.build?.plinth ?? 0;
+  for (let i = 0; i < fi; i++) h += f.floors[i].height;
+  return Math.max(0.3, h);
+}
 
 export const RISER_MAX = 0.18;
 export const TREAD = 0.28;
@@ -12,7 +23,7 @@ export function stairSteps(height: number) {
 export function stairBox(st: Stair, height: number) {
   const { treads } = stairSteps(height);
   const w = st.w;
-  if (st.kind === "straight") return { W: w, D: treads * TREAD };
+  if (st.kind === "straight") return { W: w, D: treads * TREAD + (st.ext ? LAND : 0) };
   if (st.kind === "spiral") {
     const R = Math.max(0.8, w);
     return { W: 2 * R, D: 2 * R };
@@ -68,9 +79,11 @@ export function drawStair(g: CanvasRenderingContext2D, st: Stair, height: number
     line(x2, y2, x2 - h * Math.cos(a + 0.5), y2 - h * Math.sin(a + 0.5));
   };
   if (st.kind === "straight") {
+    const L0 = st.ext ? LAND : 0;
     rect(-W / 2, -D / 2, W, D);
-    for (let i = 1; i < treads; i++) line(-W / 2, -D / 2 + i * TREAD, W / 2, -D / 2 + i * TREAD);
-    arrow(0, D / 2 - 0.12, 0, -D / 2 + 0.12);
+    if (L0) line(-W / 2, -D / 2 + L0, W / 2, -D / 2 + L0);
+    for (let i = 1; i < treads; i++) line(-W / 2, -D / 2 + L0 + i * TREAD, W / 2, -D / 2 + L0 + i * TREAD);
+    arrow(0, D / 2 - 0.12, 0, -D / 2 + L0 + 0.12);
   } else if (st.kind === "spiral") {
     const R = W / 2;
     g.beginPath();
@@ -110,4 +123,23 @@ export function drawStair(g: CanvasRenderingContext2D, st: Stair, height: number
     }
   }
   g.restore();
+}
+
+/** Dış merdiveni, dokunulan duvarın dış yüzüne yerleştirir: üst ucu (sahanlık) duvara bitişik, basamaklar dışarı doğru */
+export function placeExtStair(walls: { a: { x: number; y: number }; b: { x: number; y: number }; t: number }[], w: { a: { x: number; y: number }; b: { x: number; y: number }; t: number }, p: { x: number; y: number }, width: number, rise: number): { stair: Omit<Stair, "id">; pos: number; L: number } {
+  const L = Math.hypot(w.b.x - w.a.x, w.b.y - w.a.y) || 1;
+  const u = { x: (w.b.x - w.a.x) / L, y: (w.b.y - w.a.y) / L };
+  let tt = ((p.x - w.a.x) * u.x + (p.y - w.a.y) * u.y);
+  tt = Math.max(width / 2 + 0.1, Math.min(L - width / 2 - 0.1, tt));
+  const mid = { x: w.a.x + u.x * tt, y: w.a.y + u.y * tt };
+  // dış yön: evin ağırlık merkezinden uzağa
+  const pts = walls.flatMap((q) => [q.a, q.b]);
+  const c = { x: pts.reduce((s, q) => s + q.x, 0) / pts.length, y: pts.reduce((s, q) => s + q.y, 0) / pts.length };
+  let n = { x: -u.y, y: u.x };
+  if ((mid.x - c.x) * n.x + (mid.y - c.y) * n.y < 0) n = { x: -n.x, y: -n.y };
+  const rot = Math.round((Math.atan2(-n.x, n.y) * 180) / Math.PI + 360) % 360;
+  const st: Stair = { id: "", kind: "straight", x: 0, y: 0, rot, w: width, mirror: false, ext: true };
+  const D = stairBox(st, rise).D;
+  const off = w.t / 2 + D / 2;
+  return { stair: { kind: "straight", x: Math.round((mid.x + n.x * off) * 1000) / 1000, y: Math.round((mid.y + n.y * off) * 1000) / 1000, rot, w: width, mirror: false, ext: true }, pos: tt, L };
 }

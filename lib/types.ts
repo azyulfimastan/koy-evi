@@ -22,6 +22,7 @@ export type Stair = {
   rot: number; // derece (0/90/180/270)
   w: number; // basamak genişliği (m)
   mirror: boolean;
+  ext?: boolean; // dış merdiven: zeminden bu katın döşemesine çıkar, sahanlıklı
 };
 export type FamilyVote = { id: string; who: string; score: number; note: string };
 export type Balcony = {
@@ -58,8 +59,10 @@ export type Build = {
   topSlab: boolean; // en üst katın tavanına da beton at
   autoCols: boolean; // köşelere ve duvar kesişimlerine otomatik direk
   colSize: number; // direk kenarı (m)
+  plinth: number; // kaide: evin zeminden yükseltilmiş temel yüksekliği (m), 0 = yok
+  plinthTex: "concrete" | "stone"; // kaide görünümü
 };
-export const defaultBuild = (): Build => ({ foundation: "strip", fDepth: 0.8, fWidth: 0.5, screed: true, screedT: 0.06, slabT: 0.2, topSlab: false, autoCols: true, colSize: 0.25 });
+export const defaultBuild = (): Build => ({ foundation: "strip", fDepth: 0.8, fWidth: 0.5, screed: true, screedT: 0.06, slabT: 0.2, topSlab: false, autoCols: true, colSize: 0.25, plinth: 0, plinthTex: "concrete" });
 export type Floor = {
   id: string;
   name: string;

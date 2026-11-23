@@ -2,7 +2,8 @@ import type { CatItem, EnvKind, FullData, PlanData, Pt, Stair, Wall } from "@/li
 import type { Region } from "@/lib/rooms";
 import { endJoins, wallGeom } from "@/lib/rooms";
 import { roofInfo } from "@/lib/roof";
-import { drawStair } from "@/lib/stairs";
+import { drawStair, placeExtStair, stairRise } from "@/lib/stairs";
+import { segProject } from "@/lib/geo";
 import { drawItem } from "@/lib/furniture";
 import { dist, fmt } from "@/lib/geo";
 import { ENV_KINDS, drawEnv } from "@/lib/env";
@@ -140,7 +141,7 @@ export function drawPlan(c: HTMLCanvasElement, el: HTMLDivElement, st: PlanState
       g.lineWidth = 1;
       g.stroke();
     }
-    for (const st of below.stairs) drawStair(g, st, below.height, s, ox, oy, { color: "rgba(90,80,70,0.55)", fill: "rgba(0,0,0,0)", lw: 1.5, ghost: true });
+    for (const st of below.stairs.filter((q) => !q.ext)) drawStair(g, st, below.height, s, ox, oy, { color: "rgba(90,80,70,0.55)", fill: "rgba(0,0,0,0)", lw: 1.5, ghost: true });
   }
 
   // duvarlar
@@ -238,7 +239,7 @@ export function drawPlan(c: HTMLCanvasElement, el: HTMLDivElement, st: PlanState
   // merdivenler
   for (const st of stairs) {
     const isSel = sel?.k === "stair" && sel.id === st.id;
-    drawStair(g, st, data.height, s, ox, oy, { color: isSel ? "#d9822b" : "#3d382f", fill: "rgba(255,255,255,0.7)", lw: isSel ? 2.5 : 1.3 });
+    drawStair(g, st, stairRise(full, fi, st), s, ox, oy, { color: isSel ? "#d9822b" : "#3d382f", fill: "rgba(255,255,255,0.7)", lw: isSel ? 2.5 : 1.3 });
   }
   // balkonlar
   for (const b of data.balconies ?? []) {
@@ -268,9 +269,22 @@ export function drawPlan(c: HTMLCanvasElement, el: HTMLDivElement, st: PlanState
   for (const it of ordered) drawItem(g, it, s, ox, oy, { selected: sel?.k === "item" && sel.id === it.id, label: true });
   if (tool === "furn" && pick && hover) drawItem(g, { x: hover.x, y: hover.y, rot: 0, w: pick.w, d: pick.d, shape: pick.shape, color: pick.color, name: pick.name }, s, ox, oy, { ghost: true });
   // alttaki katın merdiveni burada boşluk olarak görünür (hayalet çizildi)
+  if (tool === "xstair" && hover) {
+    let best: (typeof walls)[number] | null = null;
+    let bd = Infinity;
+    for (const w of walls) {
+      const pr = segProject(hover, w.a, w.b);
+      if (pr.d <= w.t / 2 + 28 / s && pr.d < bd) { bd = pr.d; best = w; }
+    }
+    if (best) {
+      const rise = stairRise(full, fi, { ext: true } as Stair);
+      const { stair } = placeExtStair(walls, best, hover, 1.0, rise);
+      drawStair(g, { id: "p", ...stair }, rise, s, ox, oy, { color: "#d9822b", fill: "rgba(217,130,43,0.25)", lw: 1.5 });
+    }
+  }
   if (tool === "stair" && hover) {
     const prev: Stair = { id: "p", kind: "straight", x: hover.x, y: hover.y, rot: 0, w: 1, mirror: false };
-    drawStair(g, prev, data.height, s, ox, oy, { color: "#d9822b", fill: "rgba(217,130,43,0.25)", lw: 1.5 });
+    drawStair(g, prev, prev.ext ? stairRise(full, fi, prev) : data.height, s, ox, oy, { color: "#d9822b", fill: "rgba(217,130,43,0.25)", lw: 1.5 });
   }
 
   // duvar çizim önizlemesi

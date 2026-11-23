@@ -5,7 +5,7 @@ import { flatten, newFloor, normalizeFull, uid, unflatten, defaultFull, defaultB
 import { roofInfo, ATTIC_MIN } from "@/lib/roof";
 import { buildStages, floorCols } from "@/lib/stages";
 import { defaultBalcony, inBalcony } from "@/lib/balcony";
-import { stairBox, stairLocal, stairSteps } from "@/lib/stairs";
+import { placeExtStair, stairBox, stairLocal, stairRise, stairSteps } from "@/lib/stairs";
 import { CATALOG, CATS, itemLocal } from "@/lib/furniture";
 import { area, bounds, dist, fmt, perimeter, round3, setEdgeLength, snapTo, segProject } from "@/lib/geo";
 import { endJoins, inRegion, rasterize, regionAt, wallGeom } from "@/lib/rooms";
@@ -827,6 +827,27 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
       return;
     }
 
+    if (t === "xstair") {
+      drag.current = pan(() => {
+        const cur = dataRef.current;
+        const pos = toWorld(p.x, p.y);
+        const wl = hitWall(pos, 28);
+        if (!wl) { setNote("Dış merdiven için evin bir duvarına dokun."); return; }
+        const fullNow = fullRef.current;
+        const rise = stairRise(fullNow, fiRef.current, { ext: true } as Stair);
+        const { stair, pos: pw } = placeExtStair(cur.walls, wl, pos, 1.0, rise);
+        const st: Stair = { id: uid(), ...stair };
+        // o duvarda bu noktada kapı yoksa kapı ekle
+        const has = cur.openings.some((o) => o.wall === wl.id && o.kind === "door" && Math.abs(o.pos - pw) < 0.8);
+        const ops = has ? cur.openings : [...cur.openings, { id: uid(), wall: wl.id, pos: round3(pw), w: 1, h: 2.1, sill: 0, kind: "door" as const, shape: "rect" as const, flip: false, hinge: false }];
+        apply({ ...cur, stairs: [...cur.stairs, st], openings: ops });
+        setSel({ k: "stair", id: st.id });
+        setTool("select");
+        setHover(null);
+      });
+      return;
+    }
+
     if (t === "stair") {
       drag.current = pan(() => {
         const cur = dataRef.current;
@@ -903,7 +924,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
     }
     for (const st of d.stairs) {
       const lp = stairLocal(st, w);
-      const bx = stairBox(st, d.height);
+      const bx = stairBox(st, stairRise(fullRef.current, fiRef.current, st));
       if (Math.abs(lp.x) <= bx.W / 2 && Math.abs(lp.y) <= bx.D / 2) {
         setSel({ k: "stair", id: st.id });
         drag.current = { kind: "smove", id: st.id, start: w, x0: st.x, y0: st.y, before: cloneFull(), moved: false };
@@ -955,7 +976,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
       if (t !== "wall") snapRef.current = null;
       if (t === "wall") setHover(snapWall(wpt, chainRef.current));
       else if (t === "plot" && !dataRef.current.plot.closed) setHover(sn(wpt));
-      else if (t === "door" || t === "window") setHover(wpt);
+      else if (t === "door" || t === "window" || t === "xstair") setHover(wpt);
       else if (t === "stair" || t === "furn" || t === "env" || t === "build") setHover(sn(wpt));
     };
     if (!d) {
@@ -1428,6 +1449,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
     ["furn", "Eşya"],
     ["env", "Çevre"],
     ["stair", "Merdiven"],
+    ["xstair", "Dış merdiven"],
     ["balcony", "Balkon"],
     ["build", "Yapı"],
     ["roof", "Çatı"],
@@ -2136,7 +2158,8 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
             {tool !== "plot" && selStair && (
               <>
                 <h3>Merdiven</h3>
-                <label className="edge">
+                {selStair.ext && <div className="muted small">🪜 Dış merdiven: zeminden bu katın döşemesine çıkar, üstünde sahanlık ve korkuluk vardır.</div>}
+                {!selStair.ext && <label className="edge">
                   <span>Tür</span>
                   <select value={selStair.kind} onChange={(e) => patchStair(selStair.id, (q) => ({ ...q, kind: e.target.value as Stair["kind"] }))}>
                     <option value="straight">Düz</option>
@@ -2144,7 +2167,7 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
                     <option value="U">U şeklinde</option>
                     <option value="spiral">Sarmal</option>
                   </select>
-                </label>
+                </label>}
                 <NumField key={selStair.id + ":w:" + selStair.w} label="Genişlik (cm)" value={selStair.w * 100} decimals={0}
                   onCommit={(v) => patchStair(selStair.id, (q) => ({ ...q, w: round3(Math.max(0.6, Math.min(2, v / 100))) }))} />
                 <div className="row">
@@ -2152,8 +2175,9 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
                   <button onClick={() => patchStair(selStair.id, (q) => ({ ...q, mirror: !q.mirror }))}>Aynala</button>
                 </div>
                 {(() => {
-                  const st = stairSteps(data.height);
-                  const bx = stairBox(selStair, data.height);
+                  const rise = stairRise(full, fi, selStair);
+                  const st = stairSteps(rise);
+                  const bx = stairBox(selStair, rise);
                   return (
                     <div className="stats">
                       <div><span>Basamak</span><b>{st.risers} × {fmt(st.riser * 100, 1)} cm</b></div>
@@ -2161,7 +2185,8 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
                     </div>
                   );
                 })()}
-                <div className="muted small">Basamak sayısı, bu katın yüksekliğinden ({fmt(data.height * 100, 0)} cm) hesaplanır. Üst katta merdiven boşluğu kesikli çizgiyle görünür.</div>
+                {selStair.ext && stairRise(full, fi, selStair) <= 0.31 && <div className="warnbox">⚠️ Çıkılacak yükseklik yok. Yapı panelinden kaide yüksekliğini gir ya da bu merdiveni üst kata koy.</div>}
+                <div className="muted small">Basamak sayısı, {selStair.ext ? "zeminden bu katın döşemesine olan yükseklikten" : "bu katın yüksekliğinden"} ({fmt(stairRise(full, fi, selStair) * 100, 0)} cm) hesaplanır. Üst katta merdiven boşluğu kesikli çizgiyle görünür.</div>
                 <button className="danger" onClick={deleteSel}>Merdiveni sil</button>
               </>
             )}
@@ -2229,6 +2254,18 @@ export default function Editor({ id, onBack }: { id: string; onBack: () => void 
                       <NumField key={"fw" + b.fWidth} label="Temel genişliği (cm)" value={b.fWidth * 100} decimals={0} onCommit={(v) => setB({ fWidth: round3(Math.max(0.3, Math.min(1.5, v / 100))) })} />
                     </>
                   )}
+                  <h4>Kaide (yükseltilmiş temel)</h4>
+                  <NumField key={"pl" + b.plinth} label="Ev zeminden ne kadar yüksekte (cm)" value={b.plinth * 100} decimals={0} onCommit={(v) => setB({ plinth: round3(Math.max(0, Math.min(2.5, v / 100))) })} />
+                  {b.plinth > 0 && (
+                    <label className="edge">
+                      <span>Kaide görünümü</span>
+                      <select value={b.plinthTex} onChange={(e) => setB({ plinthTex: e.target.value as typeof b.plinthTex })}>
+                        <option value="concrete">Beton (gri)</option>
+                        <option value="stone">Taş kaplama</option>
+                      </select>
+                    </label>
+                  )}
+                  <div className="muted small">0 = ev zeminle aynı seviyede. Yükseltirsen ev bu kadar yukarıdan başlar; girişe çıkmak için <b>Dış merdiven</b> aracını kullan.</div>
                   <h4>Zemin ve katlar</h4>
                   <label className="chk"><input type="checkbox" checked={b.screed} onChange={(e) => setB({ screed: e.target.checked })} /> Zemin betonu ve şap</label>
                   <NumField key={"sl" + b.slabT} label="Kat betonu kalınlığı (cm)" value={b.slabT * 100} decimals={0} onCommit={(v) => setB({ slabT: round3(Math.max(0.1, Math.min(0.4, v / 100))) })} />

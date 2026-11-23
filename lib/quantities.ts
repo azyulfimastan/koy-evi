@@ -5,6 +5,7 @@ import { outsideFn, outsideMask } from "./scene3d";
 import { roofInfo } from "./roof";
 import { plinthInfo } from "./terrain";
 import { floorCols } from "./stages";
+import { LAND, stairRise, stairSteps, TREAD } from "./stairs";
 import { defaultBuild } from "./types";
 import { EXT_TEX, FLOOR_TEX, INT_TEX, ROOF_TEX } from "./textures";
 
@@ -44,7 +45,10 @@ export function computeReport(f: FullData): Report {
   const items = new Map<string, number>();
   let stairs = 0;
   let balN = 0, balVol = 0, balRail = 0, balArea = 0;
-  let foundLen = 0,
+  let extN = 0,
+    extVol = 0,
+    plVol = 0,
+    foundLen = 0,
     beamVol = 0,
     slabVol = 0,
     slabArea = 0,
@@ -105,7 +109,13 @@ export function computeReport(f: FullData): Report {
       floorTex.set(k, (floorTex.get(k) ?? 0) + a);
       if (fi === 0) footprint += a;
     }
-    stairs += fl.stairs.length;
+    stairs += fl.stairs.filter((q) => !q.ext).length;
+    for (const st of fl.stairs.filter((q) => q.ext)) {
+      const rise = stairRise(f, fi, st);
+      extN += 1;
+      extVol += st.w * (stairSteps(rise).treads * TREAD * rise * 0.5 + LAND * rise);
+    }
+    if (fi === 0) plVol = fl.walls.reduce((sum, w) => sum + Math.hypot(w.b.x - w.a.x, w.b.y - w.a.y) * (w.t + 0.04) * (f.build?.plinth ?? 0), 0);
     for (const b of fl.balconies ?? []) {
       if (!fl.walls.some((q) => q.id === b.wall)) continue;
       balN += 1;
@@ -187,6 +197,8 @@ export function computeReport(f: FullData): Report {
     ar("Radye temel kazısı", (firstArea + foundLen * 0.9) * 0.5, "m³");
     ar("Radye temel betonu (40 cm)", (firstArea + foundLen * 0.9) * 0.4, "m³");
   }
+  ar(`Kaide betonu / taş dolgu (${Math.round(bld.plinth * 100)} cm yükseklik)`, plVol, "m³", "duvar altı, zeminden döşemeye");
+  ar("Dış merdiven (beton basamak + sahanlık)", extVol, "m³", `${extN} adet`);
   if (bld.screed) ar("Zemin şapı", firstArea * bld.screedT, "m³", `${fmt(firstArea)} m² × ${Math.round(bld.screedT * 100)} cm`);
   ar(`Zemin/ara döşeme betonu (${Math.round(bld.slabT * 100)} cm)`, slabVol, "m³", `${fmt(slabArea)} m² döşeme alanı`);
   ar("Direk (kolon) adedi", colCount, "adet", `${Math.round(bld.colSize * 100)} × ${Math.round(bld.colSize * 100)} cm`);

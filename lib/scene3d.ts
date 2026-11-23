@@ -8,7 +8,7 @@ import { roofInfo } from "./roof";
 import { balconyRect } from "./balcony";
 import { terrainFn } from "./terrain";
 import type { Balcony } from "./types";
-import { stairBox, stairLocal, stairSteps, TREAD } from "./stairs";
+import { LAND, stairBox, stairLocal, stairRise, stairSteps, TREAD } from "./stairs";
 import { buildStages, floorCols, reached } from "./stages";
 import { defaultBuild } from "./types";
 
@@ -72,7 +72,7 @@ const CUT_CAP = "#6d6155";
 
 /** Her katın döşeme üst kotu (m) */
 export function floorBases(f: FullData) {
-  let e = 0;
+  let e = Math.max(0, f.build?.plinth ?? 0); // kaide: ev zeminden bu kadar yüksekte başlar
   return f.floors.map((fl) => {
     const b = e;
     e += fl.height;
@@ -535,7 +535,7 @@ function buildSlab(fl: Floor, below: Floor | null, base: number, m: Mats, g: THR
   for (let k = 0; k < W * H; k++) inside[k] = out[k] || blocked[k] ? 0 : 1;
   // alt kattan gelen merdiven boşluğu
   if (below) {
-    for (const st of below.stairs) {
+    for (const st of below.stairs.filter((q) => !q.ext)) {
       const { W: sw, D: sd } = stairBox(st, below.height);
       for (let j = 0; j < H; j++)
         for (let i = 0; i < W; i++) {
@@ -651,6 +651,32 @@ function buildFoundation(f: FullData, fi: number, mode: "dig" | "found", m: Mats
   g.add(mesh);
 }
 
+/** Kaide: ev zeminden yükseltilmişse duvarların altında zeminden döşemeye kadar beton / taş blok */
+function buildPlinth(f: FullData, fi: number, m: Mats, g: THREE.Group) {
+  const b = f.build ?? defaultBuild();
+  const fl = f.floors[fi];
+  if (!(b.plinth > 0.01) || !fl || !fl.walls.length) return;
+  const mat = b.plinthTex === "stone" ? m.plinth : m.concrete;
+  const geos: THREE.BufferGeometry[] = [];
+  for (const w of fl.walls) {
+    const dx = w.b.x - w.a.x;
+    const dy = w.b.y - w.a.y;
+    const L = Math.hypot(dx, dy);
+    if (L < 0.05) continue;
+    const bg = new THREE.BoxGeometry(L + w.t, b.plinth + 0.3, w.t + 0.04);
+    bg.rotateY(-Math.atan2(dy, dx));
+    bg.translate((w.a.x + w.b.x) / 2, (b.plinth - 0.3) / 2, (w.a.y + w.b.y) / 2);
+    geos.push(ni(bg));
+  }
+  const merged = geos.length ? mergeGeometries(geos) : null;
+  geos.forEach((q) => q.dispose());
+  if (!merged) return;
+  const mesh = new THREE.Mesh(merged, mat);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  g.add(mesh);
+}
+
 /* ---------------- oda zemin kaplamaları ---------------- */
 function buildRoomFloors(fl: Floor, below: Floor | null, base: number, clip: THREE.Plane[], g: THREE.Group) {
   const rs = fl.rooms.filter((rm) => rm.floor && rm.floor !== "none");
@@ -668,7 +694,7 @@ function buildRoomFloors(fl: Floor, below: Floor | null, base: number, clip: THR
       for (let j = 0; j < H; j++)
         for (let i = 0; i < W; i++) {
           if (!mask[j * W + i]) continue;
-          for (const st of below.stairs) {
+          for (const st of below.stairs.filter((q) => !q.ext)) {
             const { W: sw, D: sd } = stairBox(st, below.height);
             const lp = stairLocal(st, { x: reg.x0 + (i + 0.5) * cell, y: reg.y0 + (j + 0.5) * cell });
             if (Math.abs(lp.x) <= sw / 2 && Math.abs(lp.y) <= sd / 2) mask[j * W + i] = 0;
@@ -807,6 +833,33 @@ function buildStair(st: Stair, H: number, base: number, m: Mats, g: THREE.Group)
   if (st.kind === "straight") {
     const r = H / (treads + 1);
     for (let i = 0; i < treads; i++) box(-W / 2, W / 2, D / 2 - (i + 1) * TREAD, D / 2 - i * TREAD, (i + 1) * r);
+    if (st.ext) {
+      // sahanlık (katı beton blok) ve iki yanda korkuluk
+      box(-W / 2, W / 2, -D / 2, -D / 2 + LAND, H);
+      const RH = 0.95;
+      const Ls = D - LAND;
+      for (const sx of [-1, 1]) {
+        const x = sx * (W / 2 - 0.03);
+        const len = Math.hypot(Ls, H);
+        const rail = new THREE.BoxGeometry(0.05, 0.05, len);
+        rail.rotateX(Math.atan2(H, Ls));
+        rail.translate(x, H / 2 + RH, D / 2 - Ls / 2);
+        geos.push(ni(rail));
+        const flat = new THREE.BoxGeometry(0.05, 0.05, LAND);
+        flat.translate(x, H + RH, -D / 2 + LAND / 2);
+        geos.push(ni(flat));
+        for (let i = 0; i < treads; i += 2) {
+          const post = new THREE.BoxGeometry(0.04, RH, 0.04);
+          post.translate(x, (i + 1) * r + RH / 2, D / 2 - (i + 0.5) * TREAD);
+          geos.push(ni(post));
+        }
+        for (const yy of [-D / 2 + 0.04, -D / 2 + LAND - 0.04]) {
+          const post = new THREE.BoxGeometry(0.04, RH, 0.04);
+          post.translate(x, H + RH / 2, yy);
+          geos.push(ni(post));
+        }
+      }
+    }
   } else if (st.kind === "spiral") {
     const R = W / 2;
     const r = H / (treads + 1);
@@ -1733,8 +1786,8 @@ export function buildHouse(f: FullData, fi: number, v: V3, secPlane?: THREE.Plan
     sg.userData = { floor: 0 };
     house.add(sg);
     if (R("dig") && !R("found")) buildFoundation(f, firstWalls, "dig", plain, sg);
-    if (R("found")) buildFoundation(f, firstWalls, "found", plain, sg);
-    if (R("screed")) buildSlab(f.floors[firstWalls], null, 0, plain, sg, plain.concrete, bld.slabT);
+    if (R("found")) { buildFoundation(f, firstWalls, "found", plain, sg); buildPlinth(f, firstWalls, plain, sg); }
+    if (R("screed")) buildSlab(f.floors[firstWalls], null, bases[firstWalls], plain, sg, plain.concrete, bld.slabT);
   }
   for (let i = lo; i <= hi; i++) {
     const fl = f.floors[i];
@@ -1750,10 +1803,11 @@ export function buildHouse(f: FullData, fi: number, v: V3, secPlane?: THREE.Plan
       if (R("walls", i)) buildBalconies(fl, bases[i], plain, fg);
       continue;
     }
+    if (i === firstWalls) buildPlinth(f, i, plain, fg);
     buildSlab(fl, i > 0 ? f.floors[i - 1] : null, bases[i], plain, fg, undefined, bld.slabT);
     buildRoomFloors(fl, i > 0 ? f.floors[i - 1] : null, bases[i], m.clip, fg);
     buildWalls(fl, bases[i], m, !!v.cut && i === topShown, fg, i);
-    for (const st of fl.stairs) buildStair(st, fl.height, bases[i], m, fg);
+    for (const st of fl.stairs) buildStair(st, st.ext ? stairRise(f, i, st) : fl.height, st.ext ? 0 : bases[i], m, fg);
     buildBalconies(fl, bases[i], plain, fg);
     if (v.items) for (const it of fl.items) buildItem(it, bases[i], m, fg);
     if (bld.topSlab && i === topWalls && !v.cut) buildSlab(fl, fl, bases[i] + fl.height, plain, fg, undefined, bld.slabT);
@@ -1767,8 +1821,9 @@ export function buildHouse(f: FullData, fi: number, v: V3, secPlane?: THREE.Plan
       pg.userData = { floor: firstWalls };
       for (const w of fl0.walls) {
         const L = Math.hypot(w.b.x - w.a.x, w.b.y - w.a.y);
-        const dep = -Math.min(hf(w.a.x, w.a.y), hf(w.b.x, w.b.y), hf((w.a.x + w.b.x) / 2, (w.a.y + w.b.y) / 2)) + 0.3;
-        if (dep <= 0.31 || L < 0.01) continue;
+        const dep0 = -Math.min(hf(w.a.x, w.a.y), hf(w.b.x, w.b.y), hf((w.a.x + w.b.x) / 2, (w.a.y + w.b.y) / 2)) + 0.3;
+        if (dep0 <= 0.31 || L < 0.01) continue;
+        const dep = dep0 + bases[firstWalls];
         const me = new THREE.Mesh(new THREE.BoxGeometry(L, dep, w.t + 0.02), plain.concrete);
         me.position.set((w.a.x + w.b.x) / 2, -dep / 2 + bases[firstWalls], (w.a.y + w.b.y) / 2);
         me.rotation.y = -Math.atan2(w.b.y - w.a.y, w.b.x - w.a.x);

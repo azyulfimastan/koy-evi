@@ -24,3 +24,14 @@ test("iki katlı: merdiven ve hol, balkon dışarı bakar", () => {
   const b = r.full.floors[1].balconies![0];
   assert.equal(b.side, -1);
 });
+
+test("kaide ve dış merdiven: girişe ve 1. kata dış merdiven, iç merdiven kapatılabilir", () => {
+  const s: WSpec = { ...defaultSpec(), floors: 2, plinth: 1.2, upperExt: true, innerStair: false };
+  const t = (type: any, w: number, d: number) => ({ id: newId(), type, w, d });
+  s.rooms = [[t("salonmutfak", 6, 4.5), t("yatak", 3.5, 3.5), t("banyo", 2.2, 2.5)], [t("yatak", 3.5, 3.5), t("cocuk", 3, 3), t("banyo", 2.2, 2.5)]];
+  const r = generate(s);
+  assert.equal(r.full.build?.plinth, 1.2);
+  assert.equal(r.full.floors[0].stairs.filter((q) => q.ext).length, 1);
+  assert.equal(r.full.floors[1].stairs.filter((q) => q.ext).length, 1);
+  assert.equal(r.full.floors.flatMap((f) => f.stairs).filter((q) => !q.ext).length, 0);
+});

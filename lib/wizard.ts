@@ -1,5 +1,6 @@
 import type { FullData, Floor, Wall, Opening, Item, Room } from "./types";
-import { normalizeFull } from "./types";
+import { normalizeFull, defaultBuild } from "./types";
+import { placeExtStair } from "./stairs";
 
 /* Sihirbaz: girilen rakamlardan (oda, kat, balkon, çatı) otomatik ev üretir. */
 export type RoomType = "salon" | "salonmutfak" | "mutfak" | "yatak" | "cocuk" | "banyo" | "wc" | "calisma" | "depo";
@@ -18,6 +19,10 @@ export type WSpec = {
   roof: "gable" | "hip" | "shed" | "flat" | "none";
   pitch: number;
   furnish: boolean;
+  plinth: number; // kaide yüksekliği (m)
+  entryStair: boolean; // girişe dış merdiven
+  upperExt: boolean; // 1. kata dış merdiven
+  innerStair: boolean; // katlar arası iç merdiven
 };
 
 export const RT: Record<RoomType, { name: string; color: string; floor: string; front: number; w: number; d: number }> = {
@@ -41,7 +46,7 @@ export function defaultSpec(): WSpec {
   return {
     plotW: 20, plotD: 24, autoSize: true, houseW: 10, houseD: 8, floors: 1, height: 2.8,
     rooms: [[r("salonmutfak", 6, 4.5), r("yatak", 3.5, 3.5), r("yatak", 3, 3), r("banyo", 2.2, 2.5)]],
-    balconies: [], roof: "gable", pitch: 30, furnish: true,
+    balconies: [], roof: "gable", pitch: 30, furnish: true, plinth: 0, entryStair: true, upperExt: false, innerStair: true,
   };
 }
 
@@ -278,8 +283,28 @@ export function generate(s: WSpec): WResult {
     // merdiven (üst kata çıkan, hol içinde)
     const stairs: Floor["stairs"] = [];
     const holC = cells.find((c) => c.hub && c.type === "hol");
-    if (multi && holC && fi < s.floors - 1) {
+    if (multi && holC && fi < s.floors - 1 && s.innerStair) {
       stairs.push({ id: uid(), kind: "U", x: (holC.x0 + holC.x1) / 2, y: (holC.y0 + holC.y1) / 2, rot: 0, w: 0.9, mirror: false });
+    }
+    // dış merdivenler
+    const pl = Math.max(0, s.plinth);
+    const ptOn = (side: "N" | "E" | "S" | "W", pos: number) => (side === "N" ? { x: pos, y: 0 } : side === "E" ? { x: W, y: pos } : side === "S" ? { x: W - pos, y: D } : { x: 0, y: D - pos });
+    const addExt = (side: "N" | "E" | "S" | "W", pos: number, rise: number) => {
+      const wall = wallOf[side];
+      const { stair } = placeExtStair(walls, wall, ptOn(side, pos), 1.0, rise);
+      stairs.push({ id: uid(), ...stair });
+    };
+    if (fi === 0 && pl > 0.3 && s.entryStair && entrance) addExt(entrance.side, posOf(entrance.side, hub), pl);
+    if (fi === 0 && pl > 0.3 && !s.entryStair) warnings.push("Ev yüksekte ama girişe dış merdiven seçilmedi; girişe çıkış yok.");
+    if (fi === 1 && s.upperExt) {
+      const rise = pl + (floors[0]?.height ?? s.height);
+      const hol2 = cells.find((c) => c.hub && c.type === "hol");
+      const side: "E" | "W" = "E";
+      const pos = hol2 ? posOf(side, hol2) : D / 2;
+      if (balOn(side)) warnings.push("1. kat doğu duvarında balkon var; dış merdiven de oraya konuldu, yerini editörde kaydırabilirsin.");
+      for (let k = openings.length - 1; k >= 0; k--) if (openings[k].wall === wallOf[side].id && openings[k].kind === "window" && Math.abs(openings[k].pos - pos) < 1.3) openings.splice(k, 1);
+      O(wallOf[side], pos, 1.0, 2.2, 0, "door");
+      addExt(side, pos, rise);
     }
     // balkonlar
     const balconies: NonNullable<Floor["balconies"]> = balsHere.map((b) => {
@@ -293,7 +318,7 @@ export function generate(s: WSpec): WResult {
     plot: { points: [{ x: -mx, y: -my }, { x: W + mx, y: -my }, { x: W + mx, y: D + my }, { x: -mx, y: D + my }], closed: true },
     snap: 0.1, defT: 0.25,
     roof: { kind: s.roof, pitch: s.pitch, overhang: 0.5, ridge: "auto", color: "#a5523a", tex: "tile" },
-    floors, custom: [],
+    floors, custom: [], build: { ...defaultBuild(), plinth: Math.max(0, s.plinth) },
     fin: { extColor: "#efe6d6", extTex: "plain", intColor: "#f4f0e8", intTex: "plain", doorColor: "#7a4a2a", frameColor: "#ffffff", groundColor: "#8fb45f", baseColor: "#a39b8e", baseTex: "stone" },
     env: {
       sun: { month: 6, hour: 15, lat: 52, north: 0, shadows: true },
