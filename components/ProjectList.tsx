@@ -6,6 +6,7 @@ import { TEMPLATES } from "@/lib/templates";
 import Summary from "./Summary";
 import Compare from "./Compare";
 import Replay from "./Replay";
+import Wizard from "./Wizard";
 import { normalizeFull } from "@/lib/types";
 import type { FullData } from "@/lib/types";
 import { downloadBackup, parseBackup, stamp } from "@/lib/backup";
@@ -35,6 +36,7 @@ export default function ProjectList({ onOpen, onLogout }: { onOpen: (id: string)
   const fileRef = useRef<HTMLInputElement>(null);
   const [sel, setSel] = useState<string[]>([]);
   const [cmp, setCmp] = useState(false);
+  const [wiz, setWiz] = useState(false);
   const [sumId, setSumId] = useState<string | null>(null);
   const [rp, setRp] = useState<{ name: string; full: FullData } | null>(null);
   async function watch(p: Item) {
@@ -163,6 +165,11 @@ export default function ProjectList({ onOpen, onLogout }: { onOpen: (id: string)
         <button onClick={onLogout}>Çıkış</button>
       </header>
 
+      <button type="button" className="wizbtn" onClick={() => setWiz(true)}>
+        <b>✨ Hadi beraber oluşturalım</b>
+        <span>Çizmeden, sadece rakam gir: oda, kat, balkon… Ev kendiliğinden 2D ve 3D çıksın.</span>
+      </button>
+
       <form className="newp" onSubmit={create}>
         <div className="newrow">
           <input placeholder="Yeni ev adı (örn. Köy evi 1)" value={name} onChange={(e) => setName(e.target.value)} />
@@ -235,6 +242,7 @@ export default function ProjectList({ onOpen, onLogout }: { onOpen: (id: string)
         </div>
       )}
       {cmp && <Compare ids={sel} onClose={() => setCmp(false)} onSummary={(id) => { setCmp(false); setSumId(id); }} />}
+      {wiz && <Wizard onClose={() => setWiz(false)} onCreated={(id) => { setWiz(false); onOpen(id); }} />}
       {rp && <Replay full={rp.full} name={rp.name} onClose={() => setRp(null)} />}
       {sumId && <Summary id={sumId} onClose={() => { setSumId(null); load(); }} />}
 

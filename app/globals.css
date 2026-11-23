@@ -363,3 +363,70 @@ button.ghost { border-color: transparent; background: transparent; font-size: 17
 .helpwrap { position: relative; display: inline-flex; }
 .helpmenu { position: fixed; z-index: 900; background: #fffdf6; border: 1px solid #d8d0bd; border-radius: 14px; box-shadow: 0 6px 24px rgba(0,0,0,.25); padding: 6px; display: flex; flex-direction: column; gap: 4px; min-width: 250px; }
 .helpmenu button { text-align: left; padding: 12px 14px; border-radius: 10px; border: none; background: #f4efe2; font-size: 15px; white-space: nowrap; }
+
+.wiz { position: fixed; inset: 0; z-index: 860; background: #f6f2ea; display: flex; flex-direction: column; }
+.wzbar { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; background: #fdf0d5; border-bottom: 1px solid #e6cf9b; }
+.wzbar button { padding: 8px 12px; border-radius: 10px; border: 1px solid #d9c08a; background: #fff; font-size: 14px; }
+.wzbody { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.wzprev { flex: none; height: 38vh; display: flex; flex-direction: column; border-bottom: 1px solid #e6dfd0; background: #f3efe4; }
+.wztabs { display: flex; gap: 6px; padding: 6px 8px; align-items: center; overflow-x: auto; }
+.wztabs button { padding: 6px 12px; border-radius: 999px; border: 1px solid #c9bfa6; background: #fff; font-size: 14px; white-space: nowrap; }
+.wztabs button.on { background: #2a2a24; color: #fff; border-color: #2a2a24; }
+.wzdim { margin-left: auto; font-size: 13px; color: #6b6657; white-space: nowrap; }
+.wzview { flex: 1; min-height: 0; position: relative; }
+.wzview > * { position: absolute; inset: 0; }
+.wzview .v3 { position: absolute; inset: 0; }
+.wzsvg svg { width: 100%; height: 100%; }
+.wz3load { display: grid; place-items: center; height: 100%; color: #6b6657; }
+.wzform { flex: 1; min-height: 0; overflow: auto; padding: 10px 12px 18px; display: flex; flex-direction: column; gap: 10px; }
+.wzsteps { display: flex; gap: 6px; overflow-x: auto; }
+.wzsteps button { padding: 8px 10px; border-radius: 10px; border: 1px solid #d8d0bd; background: #fff; font-size: 13px; white-space: nowrap; }
+.wzsteps button i { font-style: normal; display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: #e8e1cf; margin-right: 3px; font-size: 12px; }
+.wzsteps button.on { background: #2f6b3a; color: #fff; border-color: #2f6b3a; }
+.wzsteps button.on i { background: #fff; color: #2f6b3a; }
+.wzsteps button.done i { background: #bfe0b5; }
+.wzform h3 { margin: 6px 0 4px; font-size: 16px; }
+.wzform section { display: flex; flex-direction: column; gap: 8px; }
+.wzrow { display: flex; gap: 10px; flex-wrap: wrap; }
+.wzchips { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.wzchips button { padding: 10px 16px; border-radius: 12px; border: 1px solid #c9bfa6; background: #fff; font-size: 15px; }
+.wzchips button.on { background: #2f6b3a; color: #fff; border-color: #2f6b3a; }
+.wzchips.small button { padding: 7px 11px; font-size: 13px; }
+.wzchips.small span { font-size: 13px; color: #6b6657; }
+.wnum { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: #6b6657; flex: 1; min-width: 118px; }
+.wnum div { display: flex; }
+.wnum input { width: 100%; min-width: 0; text-align: center; font-size: 16px; padding: 8px 2px; border: 1px solid #c9bfa6; border-left: none; border-right: none; background: #fff; }
+.wnum button { width: 38px; font-size: 18px; border: 1px solid #c9bfa6; background: #f4efe2; }
+.wnum button:first-child { border-radius: 10px 0 0 10px; }
+.wnum button:last-child { border-radius: 0 10px 10px 0; }
+.wroom { display: grid; grid-template-columns: 1fr 1fr auto; gap: 6px; align-items: end; background: #fffdf6; border: 1px solid #e6dfd0; border-radius: 12px; padding: 8px; }
+.wroom select { grid-column: 1 / -1; font-size: 16px; padding: 8px; border-radius: 10px; border: 1px solid #c9bfa6; background: #fff; }
+.wroom.bal { grid-template-columns: 1fr 1fr; }
+.wroom.bal .wzarea { align-self: center; font-size: 14px; color: #2f6b3a; font-weight: 600; }
+.wsel { display: flex; flex-direction: column; font-size: 12px; color: #6b6657; gap: 2px; }
+.wsel select { grid-column: auto; }
+.wdel { padding: 8px 12px; border-radius: 10px; border: 1px solid #e3b5ae; background: #fff; }
+.wadd, .wnav button { padding: 12px 14px; border-radius: 12px; border: 1px solid #c9bfa6; background: #fff; font-size: 15px; }
+.wnav { display: flex; gap: 8px; margin-top: 6px; position: sticky; bottom: 0; background: linear-gradient(transparent, #f6f2ea 30%); padding-top: 10px; }
+.wnav button { flex: 1; font-weight: 700; }
+.wnav button.go { background: #2f6b3a; color: #fff; border-color: #2f6b3a; }
+.wnav button:disabled { opacity: .45; }
+.wznote { margin: 0; font-size: 13px; color: #6b6657; line-height: 1.4; }
+.wzlist { display: flex; flex-direction: column; gap: 3px; font-size: 14px; }
+.wzlist div { display: flex; justify-content: space-between; gap: 8px; padding: 5px 8px; background: #fffdf6; border-radius: 8px; }
+.wzlist div.off { background: #fde9cf; }
+.wwarn { background: #fff1d6; border: 1px solid #ecd199; border-radius: 10px; padding: 8px 10px; font-size: 13px; }
+.wchk { display: flex; gap: 8px; align-items: center; font-size: 14px; }
+.wname { font-size: 16px; padding: 10px; border-radius: 10px; border: 1px solid #c9bfa6; }
+@media (min-width: 900px) {
+  .wzbody { flex-direction: row; }
+  .wzprev { height: auto; width: 56%; border-bottom: none; border-right: 1px solid #e6dfd0; }
+  .wzform { width: 44%; }
+}
+
+.wizbtn { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; text-align: left; padding: 14px 16px; margin-bottom: 10px; border-radius: 14px; border: 1px solid #e6cf9b; background: linear-gradient(135deg, #fff3d6, #fde4b0); }
+.wizbtn b { font-size: 17px; color: #5b3d0a; }
+.wizbtn span { font-size: 13px; color: #6b5a3a; }
+.wzsteps { position: sticky; top: -10px; z-index: 5; background: #f6f2ea; padding: 10px 0 6px; margin-top: -10px; }
+.wzform { padding-bottom: 8px; }
+.wzform section { padding-bottom: 8px; }

@@ -37,6 +37,7 @@ Sonra `tests/e2e` klasöründen (görüntüler `tests/shots/` içine düşer):
 | `villa_gorsel.py`, `ogretici_gorsel.py` | süper ev şablonu ve öğretici için ekran görüntüleri |
 | `performans_test.py` | 3 katlı büyük evde 3D kurulum süresi |
 | `v22_test.py` | adım adım izle: ileri/geri, aşama atlama, oynat, Evlerim listesinden izleme |
+| `v23_test.py` | sihirbaz: rakam gir, 2D + 3D önizleme, ev oluştur |
 | `foto_test.py` | gerçekçi fotoğraf modu (küçük boyutta) |
 | `gorsel.py`, `liste_gorsel.py` | örnek evin ekran görüntüleri |
 
