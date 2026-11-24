@@ -31,6 +31,7 @@ export default function Login({ onDone }: { onDone: () => void }) {
           <HouseLogo size={42} />
           <h1>Köy Evi Tasarım</h1>
         </div>
+        <div className="by">AHMET KULA TARAFINDAN GELİŞTİRİLMİŞTİR</div>
         <p className="muted">Hayalindeki köy evini çiz, 3D gez, malzemesini hesapla. Devam etmek için şifreni gir.</p>
         <input
           type="password"
@@ -45,7 +46,6 @@ export default function Login({ onDone }: { onDone: () => void }) {
           {busy ? "Giriş yapılıyor…" : "Giriş yap"}
         </button>
         <div className="ver">Köy Evi Tasarım {VERSION}</div>
-        <div className="by">Ahmet Kula tarafından geliştirilmiştir</div>
       </form>
     </div>
   );
