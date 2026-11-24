@@ -26,6 +26,7 @@ export default function Login({ onDone }: { onDone: () => void }) {
     <div className="center loginbg">
       <Landscape />
       <form className="card login" onSubmit={submit}>
+        <div className="welcome">3D Mimari Çizim Programına hoş geldiniz</div>
         <div className="brand">
           <HouseLogo size={42} />
           <h1>Köy Evi Tasarım</h1>
@@ -44,6 +45,7 @@ export default function Login({ onDone }: { onDone: () => void }) {
           {busy ? "Giriş yapılıyor…" : "Giriş yap"}
         </button>
         <div className="ver">Köy Evi Tasarım {VERSION}</div>
+        <div className="by">Ahmet Kula tarafından geliştirilmiştir</div>
       </form>
     </div>
   );

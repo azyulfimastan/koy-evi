@@ -491,3 +491,6 @@ button.ghost { border-color: transparent; background: transparent; font-size: 17
 .rp3d .v3 { flex: 1; }
 .rpbody.m3d .rp3d { border: 0; }
 @media (max-width: 760px) { .rpbody.mboth { flex-direction: column; } .rp3d { border-left: 0; border-top: 2px solid #2f7d6b; } }
+
+.login .welcome { text-align: center; font-size: 13px; font-weight: 600; color: #3f6b2a; letter-spacing: .02em; }
+.login .by { text-align: center; font-size: 12px; color: var(--muted); margin-top: -4px; }
